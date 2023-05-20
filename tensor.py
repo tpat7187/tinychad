@@ -32,15 +32,17 @@ class MATMUL(OP):
     self.saved[1].grad += np.dot(self.saved[0].T().data, out_grad)
 
 class SUM(OP):
-  def __init__(self, saved = None): 
+  def __init__(self, saved = None, axis = None): 
     self.arg = type(self).__name__
     self.saved = np.array(saved)
+    self.axis = axis
 
-  def forward(x):
-    return tensor(np.array([x.data.sum()]), op = SUM(saved = (x,)))
+  def forward(x, axis):
+    return tensor(np.array([x.data.sum(axis = axis)]), op = SUM(saved = (x,), axis = axis))
 
   # the backward pass needs to know what axis we summed over
   def backward(self, out_grad, out):
+    print(self.axis)
     self.saved[0].grad += out_grad 
 
 class LOAD(OP): 
@@ -70,7 +72,7 @@ class tensor:
   # fundamental OPS
   def add(self, x): return ADD.forward(self, x)
   def dot(self, x): return MATMUL.forward(self, x)
-  def sum(self): return SUM.forward(self)
+  def sum(self, axis): return SUM.forward(self, axis)
 
   # unary ops
   def T(self): return tensor(self.data.transpose())
@@ -110,7 +112,7 @@ def test():
   layer1 = inp @ l1_w + l1_b 
   layer2 = layer1 @ l2_w + l2_b
 
-  layer3 = layer2.sum()
+  layer3 = layer2.sum(axis = 1)
 
   layer3.backward(track = True)
 
