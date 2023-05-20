@@ -48,7 +48,14 @@ class MUL(OP):
     self.saved[0].grad += self.saved[1].data * out_grad
     self.saved[1].grad += self.saved[0].data * out_grad
 
-
+class DIV(OP): 
+  @staticmethod
+  def forward(x, y): 
+    return x.data / y.data
+  
+  def backward(self, out_grad, out):
+    self.saved[0].grad += (self.saved[1].data**-1) * out_grad
+    self.saved[1].grad += -(self.saved[0].data/self.saved[1].data**2) * out_grad
 
 # unary ops
 class SUM(OP):
@@ -65,6 +72,35 @@ class SUM(OP):
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad 
 
+class RELU(OP):
+  @staticmethod
+  def forward(x): return np.maximum(x.data, 0)
+
+  def backward(self, out_grad, out):
+    self.saved[0].grad += (out > 0) *out_grad
+
+
+class EXP(OP): 
+  @staticmethod
+  def forward(x): return np.exp(x.data)
+
+  def backward(self, out_grad, out):
+    self.saved[0].grad += out * out_grad
+
+class LOG(OP): 
+  @staticmethod
+  def forward(x): return np.log(x.data)
+
+  def backward(self, out_grad, out):
+    self.saved[0].grad += (1/out) * out_grad
+
+class RESHAPE(OP): 
+  @staticmethod 
+  def forward(x, *shape): return np.reshape(x.data, shape)
+
+  # how do reshapes change grad values
+  def backward(self, out_grad, out): 
+    self.saved[0].grad.reshape(out.shape)
 
 
 
