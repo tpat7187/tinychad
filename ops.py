@@ -61,7 +61,7 @@ class DIV(OP):
 class SUM(OP):
   @staticmethod
   def forward(x, axis):
-    return np.array([x.data.sum(axis = axis)])
+    return np.array([x.data.sum()]) if axis is None else x.data.sum(axis=axis)
 
   # TODO: write broadcasting so that this will work when we write NLL
     '''
@@ -89,10 +89,11 @@ class EXP(OP):
 
 class LOG(OP): 
   @staticmethod
-  def forward(x): return np.log(x.data)
+  def forward(x): 
+    return np.log(x.data)
 
   def backward(self, out_grad, out):
-    self.saved[0].grad += (1/out) * out_grad
+    self.saved[0].grad += out_grad / self.saved[0].data
 
 class RESHAPE(OP): 
   @staticmethod 
@@ -100,7 +101,8 @@ class RESHAPE(OP):
 
   # how do reshapes change grad values
   def backward(self, out_grad, out): 
-    self.saved[0].grad.reshape(out.shape)
+    print(out.shape)
+    self.saved[0].grad = self.saved[0].grad.reshape(out.shape)
 
 
 
