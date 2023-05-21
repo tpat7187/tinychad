@@ -62,20 +62,28 @@ class tensor:
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
 
+  # from tinygrad
+  def _softmax(self, axis): 
+    m = self - self.max(axis=axis, keepdim=True)
+    e = m.exp() 
+    return m, e, e.sum(axis=axis, keepdim=True)
 
   # mlops
   def softmax(self, axis = -1):
-    m = self - self.max(axis = axis, keepdim = True)
+    m = self - self.max(axis = axis, keepdim=True)
     e = m.exp()
     ss = e.sum(axis=axis, keepdim=True)
     return e.div(ss)
-  
+ 
+  # they both give correct output, something is wrong with the other ops, we should write tests
+  def logsoftmax(self, axis=-1):
+    m, _, ss = self._softmax(axis) 
+    return m - ss.log()
+  '''
   def logsoftmax(self, axis = -1):
-    m = self - self.max(axis = axis, keepdim = True)
-    e = m.exp()
-    ss = e.sum(axis=axis, keepdim=True)
-    return e.div(ss).log()
-
+    def logsumexp(x): return x.max(axis=1) + (x - x.max(axis=1).reshape(-1,1)).exp().sum(axis=1).log()
+    return self - logsumexp(self).reshape(-1,1)
+  '''
   def toposort(self, track): 
     topo, vis = [], []
     def _toposort(s): 

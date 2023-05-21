@@ -19,6 +19,7 @@ def tinychadTEST():
   l3 = l2.log().exp().relu().reshape(-1,1).logsoftmax(axis=1).sum(axis=1, keepdim = True).sum()
 
   l3.backward()
+  print(l3.data)
 
   grads = np.array([x.grad, y.grad, z.grad])
  
@@ -36,6 +37,9 @@ def torchTEST():
   l3 = l2.log().exp().relu().reshape(-1,1).log_softmax(axis=1).sum(axis=1).sum()
 
   l3.backward()
+
+  print(l3)
+
   grads = np.array([x.grad.numpy(), y.grad.numpy(), z.grad.numpy()])
 
   return grads
@@ -46,26 +50,21 @@ def LSM():
   xt = torch.tensor(N, requires_grad = True)
   x = tensor(N)
 
+  y = x.logsoftmax(axis=1)
+  yt = xt.log_softmax(axis=1)
 
-
-  y = x.logsoftmax(axis=1).sum()
-  yt = xt.log_softmax(axis=1).sum()
-
-
-  y.backward()
-  yt.backward()
-
-
-  print(x.grad)
-  print(xt.grad)
+  print(y.data)
+  print(yt)
 
 
 
 
 if __name__ == "__main__":
-  to = torchTEST() 
-  ti = tinychadTEST()
-  print((to == ti).all())
+  #to = torchTEST() 
+  #ti = tinychadTEST()
+  #print((to == ti).all())
+
+  LSM()
 
 
 
