@@ -60,8 +60,8 @@ class DIV(OP):
 # unary ops
 class SUM(OP):
   @staticmethod
-  def forward(x, axis):
-    return np.array([x.data.sum()]) if axis is None else x.data.sum(axis=axis)
+  def forward(x, axis, keepdim):
+    return np.array([x.data.sum(keepdims = keepdim)]) if axis is None else x.data.sum(axis=axis, keepdims = keepdim)
 
   # TODO: write broadcasting so that this will work when we write NLL
     '''
@@ -101,8 +101,16 @@ class RESHAPE(OP):
 
   # how do reshapes change grad values
   def backward(self, out_grad, out): 
-    print(out.shape)
     self.saved[0].grad = self.saved[0].grad.reshape(out.shape)
+
+class MAX(OP): 
+  @staticmethod
+  def forward(x, axis, keepdim): 
+    return np.array([x.data.argmax(keepdims = keepdim)]) if axis is None else x.data.argmax(axis=axis, keepdims = keepdim)
+
+  def backward(self, out_grad, out):
+    print('test')
+
 
 
 

@@ -43,16 +43,30 @@ class tensor:
   def div(self, x): return tensor(ops.DIV.forward(self, x), op = ops.DIV(saved = [self,x]))
 
   # unary
-  def sum(self, axis = None): return tensor(ops.SUM.forward(self, axis), op = ops.SUM(saved = [self,], ctx=axis))
+  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
+  def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=axis))
 
   # helpers
   def T(self): return tensor(self.data.transpose())
-  def max(self, axis = None): return self.data.max(axis=axis)
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
+
+
+  # mlops 
+  def softmax(self, axis = -1):
+    m = self - self.max(axis = axis, keepdim = True)
+    e = m.exp()
+    ss = e.sum(axis=axis, keepdim=True)
+    return e.div(ss)
+  
+  def logsoftmax(self, axis = -1):
+    m = self - self.max(axis = axis, keepdim = True)
+    e = m.exp()
+    ss = e.sum(axis=axis, keepdim=True)
+    return e.div(ss).log()
 
   def toposort(self, track): 
     topo, vis = [], []
@@ -66,6 +80,7 @@ class tensor:
     _toposort(self)
     
     # should we include load ops
+    print(*reversed(topo), sep="\n") if track == True else None
     return topo
 
   def backward(self, track = False): 
@@ -94,8 +109,30 @@ def test():
 
   layer3.backward(track = True)
 
+
+import torch
 if __name__ == "__main__":
-  test()
+  rand = np.random.randn(5,5)
+  x = tensor(rand)
+  y = x.logsoftmax(axis=1)
+
+  xt = torch.tensor(rand)
+  yt = xt.log_softmax(axis=1)
+
+  print(y.data)
+  print(yt)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

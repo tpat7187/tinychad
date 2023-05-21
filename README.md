@@ -1,5 +1,3 @@
-tinychad
-
 tinychad be a deep learning framework, not a good deep learning framework
 
 it is gonna be slow, but its gonna be based
@@ -9,8 +7,7 @@ goals:
   - recreate important deep learning architectures using tinychad (LSTM, RESNET, Transformer)
 
 TODO: 
-  - finish writing fundamental unary and binary ops
-  - gradcheck
+  - broadcasting rules for going backwards on unary ops (SUM, RESHAPE, MAX)
 
 
 
