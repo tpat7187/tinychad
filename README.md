@@ -8,7 +8,7 @@ goals:
 
 TODO: 
   - broadcasting rules for going backwards on unary ops (SUM, RESHAPE, MAX)
-  - LSM gradcheck
+      ; need to double check this
   - MNIST
 
 

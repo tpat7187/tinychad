@@ -1,41 +1,20 @@
 from tinychad.tensor import tensor
-import tinychad.ops as ops
 import torch
 
+inp = tensor.randn(28,28,10)
+inp = inp.reshape(10,-1)
 
-''' 
-the idea: multibatching during MNIST 
+l1_w = tensor.randn(784,128) 
+l1_b = tensor.randn(10,128)
 
-bias: 1x128 
-weight@input: 10x128 
-biasis gonna get broadcasted to 10x128 
-during backrpop, grad is gonna be 10x128
-cannot fit 10x128 grad into 1x128
+l2_w = tensor.randn(128,10)
+l2_b = tensor.randn(10,10)
 
-algo should check shapes and if they are unbroadcastable, then they should be unbroadcasted
+layer1 = (inp @ l1_w + l1_b).relu()
+layer2 = (layer1 @ l2_w + l2_b).relu()
+layer3 = layer2.logsoftmax(axis=1).sum(axis=1).sum()
 
-
-(5,1) : (5,5) -> (5,1) (5,1) 
-
-(5,5) : (5,5) -> (5,5) (5,5)
-
-'''
-
-out = tensor.randn(5,5).data
-saved = tensor.randn(5,1).data
-print(f"out = {out.shape}, saved ={saved.shape}")
-
-out = ops._unbr(out,saved)
-
-print(f"out = {out.shape}, saved ={saved.shape}")
-
-# take in input tensor and output shape
-# if broadcastbale 
-# unbroadcast to output shape
-
-
-
-
+layer3.backward()
 
 
 

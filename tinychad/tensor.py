@@ -1,4 +1,5 @@
 import numpy as np 
+import os
 
 class OP: 
   def __init__(self, saved = None, ctx = None):
@@ -27,7 +28,6 @@ class tensor:
 
   @property
   def size(self): return self.data.size
-
 
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.data.shape}: grad_shape = {self.grad.shape}"
@@ -88,16 +88,19 @@ class tensor:
     _toposort(self)
     
     # should we include load ops
-    print(*reversed(topo), sep="\n") if track == True else None
     return topo
 
   def backward(self, track = False): 
+    DEBUG = os.getenv("DEBUG") 
+
     assert(self.grad.shape == (1,))
     self.grad = np.ones(self.grad.shape)
     for x in reversed(self.toposort(track)): 
       assert x.grad.shape == x.shape, \
         f"grad shape must match tensor shape in {x.grad.shape} != {x.shape} on {x.op.arg}"
-      print(x, sep="\n") if track == True else None
+      if DEBUG == "1":
+        in_s = list(n.shape for n in x.op.saved)
+        print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
 
 def test(): 
@@ -115,20 +118,11 @@ def test():
   layer2 = layer1 @ l2_w + l2_b
   layer3 = layer2.sum(axis = 1).sum()
 
-  layer3.backward(track = True)
-
+  layer3.backward()
 
 import torch
 if __name__ == "__main__":
-  rand = np.random.randn(5,5)
-  x = tensor(rand)
-  y = x.logsoftmax(axis=1)
-
-  xt = torch.tensor(rand)
-  yt = xt.log_softmax(axis=1)
-
-  print(y.data)
-  print(yt)
+  test()
 
 
 

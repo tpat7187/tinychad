@@ -16,9 +16,9 @@ def tinychadTEST():
 
   l1 = x @ y + b
   l2 = l1 / z - b2
-  l3 = l2.log().exp().relu().reshape(-1,1).logsoftmax(axis=1).sum(axis=1).sum()
+  l3 = l2.log().exp().relu().reshape(-1,1).logsoftmax(axis=1).sum(axis=1, keepdim = True).sum()
 
-  l3.toposort(track = True)
+  l3.backward()
 
   grads = np.array([x.grad, y.grad, z.grad])
  
@@ -66,6 +66,8 @@ if __name__ == "__main__":
   to = torchTEST() 
   ti = tinychadTEST()
   print((to == ti).all())
+
+
 
 
 
