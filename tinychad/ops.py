@@ -1,15 +1,36 @@
 import numpy as np
-
-class OP: 
-  def __init__(self, saved = None, ctx = None):
-    self.arg = type(self).__name__
-    self.saved = np.array(saved)
-    self.ctx = ctx
+from tinychad.tensor import OP
 
 class LOAD(OP): 
   def __init__(self, saved = None):
     self.arg = type(self).__name__
     self.saved = saved
+
+''' 
+def unbroadcast(): 
+  this function will take in a shape, and if the children of the shape have been broadcasted, it will sum itself along an axis to match the child shape
+
+  DOES PYTORCH DO THIS
+
+'''
+
+# self and out_grad
+def _unbr(out_grad, saved):
+  def _unbroadcast(out_grad,saved):
+    return all((m==n) | (m==1) | (n==1) for n,m in \
+    zip(out_grad.shape[::-1], saved.shape[::-1]))
+  # if true, out_grad needs to be reshaped to saved
+  if _unbroadcast(out_grad, saved): 
+    if out_grad.shape == saved.shape:
+      return out_grad
+    else: 
+      out_grad = out_grad.sum(axis=1, keepdims = True)
+  return out_grad
+
+# takes in input tensor and output shape
+# checks if they're broadcastable
+# if they are then does the transformation
+  
 
 # binary ops
 class ADD(OP): 
@@ -27,8 +48,8 @@ class SUB(OP):
     return x.data - y.data
   
   def backward(self, out_grad, out): 
-    self.saved[0].grad += out_grad
-    self.saved[1].grad += out_grad
+    self.saved[0].grad += _unbr(out_grad, self.saved[0])
+    self.saved[1].grad += _unbr(out_grad, self.saved[1])
 
 class MATMUL(OP): 
   @staticmethod
@@ -48,14 +69,16 @@ class MUL(OP):
     self.saved[0].grad += self.saved[1].data * out_grad
     self.saved[1].grad += self.saved[0].data * out_grad
 
+
+# do we need DIV
 class DIV(OP): 
   @staticmethod
   def forward(x, y): 
     return x.data / y.data
   
   def backward(self, out_grad, out):
-    self.saved[0].grad += (self.saved[1].data**-1) * out_grad
-    self.saved[1].grad += -(self.saved[0].data/self.saved[1].data**2) * out_grad
+    self.saved[0].grad += _unbr((self.saved[1].data**-1) * out_grad, self.saved[0].grad)
+    self.saved[1].grad += _unbr(-(self.saved[0].data/self.saved[1].data**2) * out_grad, self.saved[1].grad)
 
 # unary ops
 class SUM(OP):
@@ -63,15 +86,11 @@ class SUM(OP):
   def forward(x, axis, keepdim):
     return np.array([x.data.sum(keepdims = keepdim)]) if axis is None else x.data.sum(axis=axis, keepdims = keepdim)
 
-  # TODO: write broadcasting so that this will work when we write NLL
-    '''
-    basically numpy broadcasting rules and pytorch broadcasting rules are a little different
-    we need to write our own broadcasting so that we can pass gradients back like: 
-    [5x1 to 5x5] when we do ops dimension wise
-    '''
   def backward(self, out_grad, out):
-    self.saved[0].grad += out_grad 
-
+    if not isinstance(self.ctx, int):
+      self.saved[0].grad += out_grad 
+    else: 
+      self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
 
 class RELU(OP):
   @staticmethod
@@ -108,9 +127,10 @@ class MAX(OP):
     return np.array([x.data.argmax(keepdims = keepdim)]) if axis is None else x.data.argmax(axis=axis, keepdims = keepdim)
 
   def backward(self, out_grad, out):
-    print('test')
-
-
+    if not isinstance(self.ctx, int):
+      self.saved[0].grad += out_grad 
+    else: 
+      self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
 
 
 

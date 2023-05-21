@@ -1,5 +1,5 @@
 import numpy as np
-from tensor import tensor
+from tinychad.tensor import tensor
 import torch
 
 XIN = np.ones((3,3), dtype = np.float32)
@@ -16,9 +16,9 @@ def tinychadTEST():
 
   l1 = x @ y + b
   l2 = l1 / z - b2
-  l3 = l2.log().exp().relu().reshape(-1,1).sum(axis=1).sum()
+  l3 = l2.log().exp().relu().reshape(-1,1).logsoftmax(axis=1).sum(axis=1).sum()
 
-  l3.backward()
+  l3.toposort(track = True)
 
   grads = np.array([x.grad, y.grad, z.grad])
  
@@ -33,7 +33,7 @@ def torchTEST():
 
   l1 = x @ y + b
   l2 = l1 / z - b2
-  l3 = l2.log().exp().relu().reshape(-1,1).sum()
+  l3 = l2.log().exp().relu().reshape(-1,1).log_softmax(axis=1).sum(axis=1).sum()
 
   l3.backward()
   grads = np.array([x.grad.numpy(), y.grad.numpy(), z.grad.numpy()])
@@ -41,12 +41,23 @@ def torchTEST():
   return grads
 
 def LSM(): 
-  x = tensor.randn(5,5)
-  y = x.logsoftmax().sum()
+  N = np.random.randn(5,5)
 
-  y.toposort(track = True)
+  xt = torch.tensor(N, requires_grad = True)
+  x = tensor(N)
+
+
+
+  y = x.logsoftmax(axis=1).sum()
+  yt = xt.log_softmax(axis=1).sum()
+
 
   y.backward()
+  yt.backward()
+
+
+  print(x.grad)
+  print(xt.grad)
 
 
 
@@ -54,8 +65,11 @@ def LSM():
 if __name__ == "__main__":
   to = torchTEST() 
   ti = tinychadTEST()
-  
   print((to == ti).all())
+
+
+
+
 
 
 

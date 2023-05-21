@@ -1,5 +1,12 @@
 import numpy as np 
-import ops as ops
+
+class OP: 
+  def __init__(self, saved = None, ctx = None):
+    self.arg = type(self).__name__
+    self.saved = np.array(saved)
+    self.ctx = ctx
+
+import tinychad.ops as ops
 
 #### TENSOR CLASS ####
 class tensor: 
@@ -36,6 +43,7 @@ class tensor:
   def __rmul__(self,x): return self.mul(x)
 
   # binary 
+  # ddef add(self, x): return ops.ADD.apply(self,x) -> return a tensor
   def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self,x]))
   def sub(self, x): return tensor(ops.SUB.forward(self, x), op = ops.SUB(saved = [self,x]))
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
@@ -55,7 +63,7 @@ class tensor:
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
 
 
-  # mlops 
+  # mlops
   def softmax(self, axis = -1):
     m = self - self.max(axis = axis, keepdim = True)
     e = m.exp()
