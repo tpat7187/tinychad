@@ -72,13 +72,13 @@ class SUM(OP):
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad 
 
+
 class RELU(OP):
   @staticmethod
   def forward(x): return np.maximum(x.data, 0)
 
   def backward(self, out_grad, out):
     self.saved[0].grad += (out > 0) *out_grad
-
 
 class EXP(OP): 
   @staticmethod
@@ -99,9 +99,8 @@ class RESHAPE(OP):
   @staticmethod 
   def forward(x, *shape): return np.reshape(x.data, shape)
 
-  # how do reshapes change grad values
   def backward(self, out_grad, out): 
-    self.saved[0].grad = self.saved[0].grad.reshape(out.shape)
+    self.saved[0].grad = out_grad.reshape(self.saved[0].shape)
 
 class MAX(OP): 
   @staticmethod

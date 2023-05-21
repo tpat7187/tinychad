@@ -8,6 +8,12 @@ goals:
 
 TODO: 
   - broadcasting rules for going backwards on unary ops (SUM, RESHAPE, MAX)
+  - LSM gradcheck
+  - MNIST
 
+
+things to read: 
+   - https://ai.stackexchange.com/questions/11643/how-should-i-implement-the-backward-pass-through-a-flatten-layer-of-a-cnn
+          ; "unbroadcasting (unflattening) during backpropogation"
 
 
