@@ -36,6 +36,8 @@ def _unbr(out_grad, saved):
 class ADD(OP): 
   @staticmethod
   def forward(x, y): 
+    if(x.shape != y.shape): 
+      x.data, y.data = CAST.forward(x,y)
     return x.data + y.data
   
   def backward(self, out_grad, out): 
@@ -114,13 +116,6 @@ class LOG(OP):
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad / self.saved[0].data
 
-class RESHAPE(OP): 
-  @staticmethod 
-  def forward(x, *shape): return np.reshape(x.data, shape)
-
-  def backward(self, out_grad, out): 
-    self.saved[0].grad = out_grad.reshape(self.saved[0].shape)
-
 class MAX(OP): 
   @staticmethod
   def forward(x, axis, keepdim): 
@@ -131,6 +126,73 @@ class MAX(OP):
       self.saved[0].grad += out_grad 
     else: 
       self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
+
+# shapes
+
+class RESHAPE(OP): 
+  @staticmethod 
+  def forward(x, *shape): return np.reshape(x.data, shape)
+
+  def backward(self, out_grad, out): 
+    self.saved[0].grad = out_grad.reshape(self.saved[0].shape)
+
+
+# prett unary i guess
+class CAST(OP):
+  @staticmethod 
+  # return broadcasted x,y
+  def forward(x, y):
+    out_s = np.broadcast_shapes(x.shape, y.shape)
+    return np.broadcast_to(x.data, out_s)
+
+  def backward(self, out_grad, out): 
+    self.saved[0].grad += out_grad.sum(axis=1,keepdims=True)
+
+
+
+
+
+def is_castable(x,y):
+  return all((m==n) | (m==1) | (n==1) for n,m in \
+  zip(x.shape[::-1], y.shape[::-1]))
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
 
 
 

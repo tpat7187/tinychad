@@ -44,7 +44,7 @@ class tensor:
 
   # binary 
   # ddef add(self, x): return ops.ADD.apply(self,x) -> return a tensor
-  def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self,x]))
+  def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self, x]))
   def sub(self, x): return tensor(ops.SUB.forward(self, x), op = ops.SUB(saved = [self,x]))
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
   def mul(self, x): return tensor(ops.MUL.forward(self, x), op = ops.MUL(saved = [self,x]))
@@ -57,6 +57,8 @@ class tensor:
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=axis))
+
+  def cast(self, x): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,]))
 
   # helpers
   def T(self): return tensor(self.data.transpose())
@@ -75,7 +77,7 @@ class tensor:
     ss = e.sum(axis=axis, keepdim=True)
     return e.div(ss)
  
-  # they both give correct output, something is wrong with the other ops, we should write tests
+  #they both give correct output, something is wrong with the other ops, we should write tests
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
@@ -111,26 +113,6 @@ class tensor:
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
 
-def test(): 
-  # mnist shapes
-  inp = tensor.randn(28,28,10)
-  inp = inp.reshape(10,-1)
-
-  l1_w = tensor.randn(784,128) 
-  l1_b = tensor.randn(10,128)
-
-  l2_w = tensor.randn(128,10)
-  l2_b = tensor.randn(10,10)
-
-  layer1 = inp @ l1_w + l1_b 
-  layer2 = layer1 @ l2_w + l2_b
-  layer3 = layer2.sum(axis = 1).sum()
-
-  layer3.backward()
-
-import torch
-if __name__ == "__main__":
-  test()
 
 
 
