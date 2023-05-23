@@ -8,11 +8,11 @@ goals:
 
 TODO: 
   - broadcasting rules for going backwards on unary ops (SUM, RESHAPE, MAX)
+    * need to do broadcasting when scaling dimensions (example: (128,) to (128,10))
+  - plot computation graph
   - MNIST
 
 
-IDEAS: 
-* what if we put broadcasting behind an OP called EXPAND
 
 things to read: 
    - https://ai.stackexchange.com/questions/11643/how-should-i-implement-the-backward-pass-through-a-flatten-layer-of-a-cnn

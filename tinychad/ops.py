@@ -123,20 +123,20 @@ class RESHAPE(OP):
   def forward(x, *shape): return np.reshape(x.data, shape)
 
   def backward(self, out_grad, out): 
-    self.saved[0].grad = out_grad.reshape(self.saved[0].shape)
+    self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
 
 
 # prett unary i guess
 class CAST(OP):
   @staticmethod 
-  def forward(x, y): return np.broadcast_to(x.data, y.shape)
+  def forward(x, y): return np.broadcast_to(x.data, y.data.shape)
 
-  # TODO: how do we know what axis to sum across
   # we sum over the axis of the expand
   def backward(self, out_grad, out): 
     axis=self.ctx
-    self.saved[0].grad += out_grad.sum(axis=axis,keepdims=True)
-
+    print(out_grad.shape)
+    print(out_grad.sum(axis=axis).shape)
+    self.saved[0].grad += out_grad.sum(axis=axis, keepdims = True)
 
 def is_castable(x,y):
   return all((m==n) | (m==1) | (n==1) for n,m in \

@@ -127,12 +127,24 @@ def castable(x, y):
   assert all((m==n) | (m==1) | (n==1) for n,m in zip(x.shape[::-1], y.shape[::-1])), \
     print(f"cannot cast tensors of shape {x.shape} and {y.shape}")
   inp = [x,y]
+  # TODO: get this to work better
+  # also for broadcasting in >1 dimension we're gonna need a general rule
+  # if wee're expanding dims we should also make this a fundamental opp maybe
+  if len(x.shape) < len(y.shape): 
+    x.data = np.expand_dims(x.data, axis=0)
+    print(x.data.shape)
+  elif len(x.shape) > len(y.shape): 
+    y.data = np.expand_dims(y.data, axis=0)
+    print(y.data.shape)
+
+
   axis = 0
   for s1, s2 in zip(x.shape, y.shape):
     if s1 != s2: 
       break
     axis += 1
-  # what is this really doing
+
+  # what is this really doing, this does not work for when dimensions are different
   cst = np.where(x.shape < y.shape, 0, np.where(x.shape > y.shape, 1, -1))
   shp = np.where(x.shape > y.shape, 0, np.where(x.shape < y.shape, 1, -1))
   return inp[cst], inp[shp], axis
