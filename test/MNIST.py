@@ -24,8 +24,8 @@ class bobnet():
 
   def forward(self, x): 
     x = tensor(x)
-    x = (x.dot(self.w1) + self.b1).relu() 
-    x = (x.dot(self.w2) + self.b2).relu() 
+    x = (x.dot(self.w1))
+    x = (x.dot(self.w2))
     x = x.logsoftmax(axis=0)
 
 
@@ -56,21 +56,17 @@ class torchnet(nn.Module):
 
 # torch handles NANs and infinites differently to the way we do 
 def train(xtrain, ytrain, model):
-  BS = 2
-  for ff in (t := trange(2)):
+  BS = 10
+  for ff in (t := trange(1)):
     ind = np.random.randint(0,59000, size=BS) 
-    inp = xtrain[np.array([1, 2])[:]]
-    inp = np.interp(inp, (inp.min(), inp.max()), (0, +1)).reshape(BS,-1).astype(np.float32)
-    out = model.forward(inp)
-    print(out.data)
-    time.sleep(1)
+    inp = xtrain[np.array([ind])[:]].reshape(BS,-1)
+    out = model.forward(inp).sum()
 
 
-modelt = torchnet()
+    out.backward()
+
+
 model = bobnet()
-
-
-train(xtrain, ytrain, modelt)
 train(xtrain, ytrain, model)
 
 

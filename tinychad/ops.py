@@ -6,14 +6,6 @@ class LOAD(OP):
     self.arg = type(self).__name__
     self.saved = saved
 
-''' 
-def unbroadcast(): 
-  this function will take in a shape, and if the children of the shape have been broadcasted, it will sum itself along an axis to match the child shape
-
-  DOES PYTORCH DO THIS
-
-'''
-
 # self and out_grad
 def _unbr(out_grad, saved):
   def _unbroadcast(out_grad,saved):
@@ -30,15 +22,11 @@ def _unbr(out_grad, saved):
 # takes in input tensor and output shape
 # checks if they're broadcastable
 # if they are then does the transformation
-  
 
 # binary ops
 class ADD(OP): 
   @staticmethod
-  def forward(x, y): 
-    if(x.shape != y.shape): 
-      x.data, y.data = CAST.forward(x,y)
-    return x.data + y.data
+  def forward(x, y): return x.data + y.data
   
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad
@@ -50,8 +38,8 @@ class SUB(OP):
     return x.data - y.data
   
   def backward(self, out_grad, out): 
-    self.saved[0].grad += _unbr(out_grad, self.saved[0])
-    self.saved[1].grad += _unbr(out_grad, self.saved[1])
+    self.saved[0].grad += out_grad
+    self.saved[1].grad += out_grad
 
 class MATMUL(OP): 
   @staticmethod
@@ -79,8 +67,8 @@ class DIV(OP):
     return x.data / y.data
   
   def backward(self, out_grad, out):
-    self.saved[0].grad += _unbr((self.saved[1].data**-1) * out_grad, self.saved[0].grad)
-    self.saved[1].grad += _unbr(-(self.saved[0].data/self.saved[1].data**2) * out_grad, self.saved[1].grad)
+    self.saved[0].grad += (self.saved[1].data**-1) * out_grad
+    self.saved[1].grad += -(self.saved[0].data/self.saved[1].data**2) * out_grad
 
 # unary ops
 class SUM(OP):
@@ -119,7 +107,8 @@ class LOG(OP):
 class MAX(OP): 
   @staticmethod
   def forward(x, axis, keepdim): 
-    return np.array([x.data.argmax(keepdims = keepdim)]) if axis is None else x.data.argmax(axis=axis, keepdims = keepdim)
+    return np.array([x.data.argmax(keepdims = keepdim)]) if axis is None else \
+    x.data.argmax(axis=axis, keepdims = keepdim)
 
   def backward(self, out_grad, out):
     if not isinstance(self.ctx, int):
@@ -140,16 +129,13 @@ class RESHAPE(OP):
 # prett unary i guess
 class CAST(OP):
   @staticmethod 
-  # return broadcasted x,y
-  def forward(x, y):
-    out_s = np.broadcast_shapes(x.shape, y.shape)
-    return np.broadcast_to(x.data, out_s)
+  def forward(x, y): return np.broadcast_to(x.data, y.shape)
 
+  # TODO: how do we know what axis to sum across
+  # we sum over the axis of the expand
   def backward(self, out_grad, out): 
-    self.saved[0].grad += out_grad.sum(axis=1,keepdims=True)
-
-
-
+    axis=self.ctx
+    self.saved[0].grad += out_grad.sum(axis=axis,keepdims=True)
 
 
 def is_castable(x,y):
@@ -158,42 +144,18 @@ def is_castable(x,y):
 
 
 
+''' 
+BINARY OPS
+IF THEY ARE NOT THE SAME SHAPE WE CHECK IF THEY ARE CASTBALE
+IF THEY ARE CASTABLE WE FIND OUT WHICH ONE NEEDS TO BE CAST 
+PERFORM CAST
+PERFORM ADD, ADD SAVED needs to take in <CAST> and <OTHER> 
 
+def add(self, x): return self.cast_ops(ops.ADD, x)
+def cast_ops(self, fxn, x):
 
+return tensor(ops.ADD.forward(x_s, y_s), op = ops.ADD(saved = [x_s, y_s]))
 
-
-
-
-
-
-
-  
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
+'''
 
 

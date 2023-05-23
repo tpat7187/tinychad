@@ -43,12 +43,13 @@ class tensor:
   def __rmul__(self,x): return self.mul(x)
 
   # binary 
-  # ddef add(self, x): return ops.ADD.apply(self,x) -> return a tensor
-  def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self, x]))
-  def sub(self, x): return tensor(ops.SUB.forward(self, x), op = ops.SUB(saved = [self,x]))
+  #def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self, x]))
+  def add(self, x): return self.cast_op(ops.ADD, x) 
+  def sub(self, x): return self.cast_op(ops.SUB, x) 
+  def mul(self, x): return self.cast_op(ops.MUL, x) 
+  def div(self, x): return self.cast_op(ops.DIV, x)
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
-  def mul(self, x): return tensor(ops.MUL.forward(self, x), op = ops.MUL(saved = [self,x]))
-  def div(self, x): return tensor(ops.DIV.forward(self, x), op = ops.DIV(saved = [self,x]))
+
 
   # unary
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
@@ -58,7 +59,7 @@ class tensor:
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=axis))
 
-  def cast(self, x): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,]))
+  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
   # helpers
   def T(self): return tensor(self.data.transpose())
@@ -113,29 +114,28 @@ class tensor:
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
 
+  def cast_op(self, fxn, x):
+    x, y = self, x 
+    if x.shape == y.shape: 
+      return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
+    cst, shp, axis = castable(x,y)
+    cst = cst.cast(shp, ctx = axis)
+    return tensor(fxn.forward(cst, shp), op = fxn(saved = [cst, shp]))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def castable(x, y): 
+  assert all((m==n) | (m==1) | (n==1) for n,m in zip(x.shape[::-1], y.shape[::-1])), \
+    print(f"cannot cast tensors of shape {x.shape} and {y.shape}")
+  inp = [x,y]
+  axis = 0
+  for s1, s2 in zip(x.shape, y.shape):
+    if s1 != s2: 
+      break
+    axis += 1
+  # what is this really doing
+  cst = np.where(x.shape < y.shape, 0, np.where(x.shape > y.shape, 1, -1))
+  shp = np.where(x.shape > y.shape, 0, np.where(x.shape < y.shape, 1, -1))
+  return inp[cst], inp[shp], axis
 
 
 
