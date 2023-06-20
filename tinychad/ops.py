@@ -139,8 +139,9 @@ class CAST(OP):
     shp, r = self.ctx, out_grad
     for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
       r = r.sum(axis=0)
-    if len(out_grad.shape) == len(self.saved[0].shape):
-      r = r.sum(axis=1, keepdims = True)
+    if len(r.shape) == len(self.saved[0].shape):
+      # TODO: is this cringe
+      r = r.sum(axis=0, keepdims = True)
     self.saved[0].grad += r
 
 

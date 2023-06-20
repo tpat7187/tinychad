@@ -121,15 +121,12 @@ class tensor:
 # returns cast and output shape, sum axis idk if we need
 # castable checks cast decision returns cast target and shape target
 def castable(x, y): 
-  assert is_castable(x,y)
-
+  assert is_castable(x,y), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)
   if x.shape != out:
     return x, out, y, 0 
   if y.shape != out:
     return y, out, x, 0
-
-  #return inp[cst], inp[shp], axis
 
 def is_castable(x, y): 
   for a, b in zip(x.shape[::-1], y.shape[::-1]): 
