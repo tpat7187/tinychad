@@ -48,8 +48,8 @@ class tensor:
   def sub(self, x): return self.cast_op(ops.SUB, x) 
   def mul(self, x): return self.cast_op(ops.MUL, x) 
   def div(self, x): return self.cast_op(ops.DIV, x)
-  def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
 
+  def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
 
   # unary
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
@@ -82,12 +82,8 @@ class tensor:
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
-  '''
-  def logsoftmax(self, axis = -1):
-    def logsumexp(x): return x.max(axis=1) + (x - x.max(axis=1).reshape(-1,1)).exp().sum(axis=1).log()
-    return self - logsumexp(self).reshape(-1,1)
-  '''
-  def toposort(self, track): 
+
+  def toposort(self): 
     topo, vis = [], []
     def _toposort(s): 
       if s not in vis: 
@@ -101,12 +97,12 @@ class tensor:
     # should we include load ops
     return topo
 
-  def backward(self, track = False): 
+  def backward(self):
     DEBUG = os.getenv("DEBUG") 
 
     assert(self.grad.shape == (1,))
     self.grad = np.ones(self.grad.shape)
-    for x in reversed(self.toposort(track)): 
+    for x in reversed(self.toposort()): 
       assert x.grad.shape == x.shape, \
         f"grad shape must match tensor shape in {x.grad.shape} != {x.shape} on {x.op.arg}"
       if DEBUG == "1":
@@ -118,38 +114,36 @@ class tensor:
     x, y = self, x 
     if x.shape == y.shape: 
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
-    cst, shp, axis = castable(x,y)
-    cst = cst.cast(shp, ctx = axis)
-    return tensor(fxn.forward(cst, shp), op = fxn(saved = [cst, shp]))
+    cst, shp, ot, axis = castable(x,y)
+    cst = cst.cast(shp, ctx = shp)
+    return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
-
+# returns cast and output shape, sum axis idk if we need
+# castable checks cast decision returns cast target and shape target
 def castable(x, y): 
-  assert all((m==n) | (m==1) | (n==1) for n,m in zip(x.shape[::-1], y.shape[::-1])), \
-    print(f"cannot cast tensors of shape {x.shape} and {y.shape}")
-  inp = [x,y]
-  # TODO: get this to work better
-  # also for broadcasting in >1 dimension we're gonna need a general rule
-  # if wee're expanding dims we should also make this a fundamental opp maybe
-  if len(x.shape) < len(y.shape): 
-    x.data = np.expand_dims(x.data, axis=0)
-    print(x.data.shape)
-  elif len(x.shape) > len(y.shape): 
-    y.data = np.expand_dims(y.data, axis=0)
-    print(y.data.shape)
+  assert is_castable(x,y)
+
+  out = np.broadcast_shapes(x.shape, y.shape)
+  if x.shape != out:
+    return x, out, y, 0 
+  if y.shape != out:
+    return y, out, x, 0
+
+  #return inp[cst], inp[shp], axis
+
+def is_castable(x, y): 
+  for a, b in zip(x.shape[::-1], y.shape[::-1]): 
+    if a == 1 or b == 1 or a == b:
+      pass
+    else: 
+      return False
+  return True
 
 
-  axis = 0
-  for s1, s2 in zip(x.shape, y.shape):
-    if s1 != s2: 
-      break
-    axis += 1
-
-  # what is this really doing, this does not work for when dimensions are different
-  cst = np.where(x.shape < y.shape, 0, np.where(x.shape > y.shape, 1, -1))
-  shp = np.where(x.shape > y.shape, 0, np.where(x.shape < y.shape, 1, -1))
-  return inp[cst], inp[shp], axis
 
 
+
+  
 
 
 

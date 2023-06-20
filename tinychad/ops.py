@@ -107,14 +107,17 @@ class LOG(OP):
 class MAX(OP): 
   @staticmethod
   def forward(x, axis, keepdim): 
-    return np.array([x.data.argmax(keepdims = keepdim)]) if axis is None else \
-    x.data.argmax(axis=axis, keepdims = keepdim)
+    if axis is None: 
+      return np.array([x.data.max(keepdims = keepdim)])
+    else:
+      return x.data.max(axis=axis, keepdims = keepdim)
 
+  # TODO: fix this omegalul
+  # set the index of the maximum value to 1
   def backward(self, out_grad, out):
-    if not isinstance(self.ctx, int):
-      self.saved[0].grad += out_grad 
-    else: 
-      self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
+    l = len(self.saved[0].data)
+    ind = np.unravel_index(out.argmax(), self.saved[0].shape)
+    self.saved[0].grad[ind] += 1 / l
 
 # shapes
 
@@ -129,19 +132,16 @@ class RESHAPE(OP):
 # prett unary i guess
 class CAST(OP):
   @staticmethod 
-  def forward(x, y): return np.broadcast_to(x.data, y.data.shape)
+  def forward(x, y):
+    return np.broadcast_to(x.data, y)
 
-  # we sum over the axis of the expand
   def backward(self, out_grad, out): 
-    axis=self.ctx
-    print(out_grad.shape)
-    print(out_grad.sum(axis=axis).shape)
-    self.saved[0].grad += out_grad.sum(axis=axis, keepdims = True)
-
-def is_castable(x,y):
-  return all((m==n) | (m==1) | (n==1) for n,m in \
-  zip(x.shape[::-1], y.shape[::-1]))
-
+    shp, r = self.ctx, out_grad
+    for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
+      r = r.sum(axis=0)
+    if len(out_grad.shape) == len(self.saved[0].shape):
+      r = r.sum(axis=1, keepdims = True)
+    self.saved[0].grad += r
 
 
 ''' 
