@@ -1,7 +1,12 @@
+sys.path.insert(1, '../')
+
+import sys
 import numpy as np
 import torch.nn as nn
 import torch
 from tinychad.tensor import tensor
+from tinychad.optim import SGD
+
 from mnist import mnist
 from tqdm import tqdm, trange
 import time
@@ -23,51 +28,35 @@ class bobnet():
 
 
   def forward(self, x): 
-    x = tensor(x)
-    x = (x.dot(self.w1))
-    x = (x.dot(self.w2))
-    x = x.logsoftmax(axis=0)
+    x = tensor(x).reshape(1,-1)
 
+    x = (x.dot(self.w1)).relu()
+    x = (x.dot(self.w2)).relu()
+
+    x = x.logsoftmax(axis=1)
 
     return x
-
-class torchnet(nn.Module): 
-  def __init__(self): 
-    super().__init__()
-    self.w1 = torch.tensor(W1)
-    self.b1 = torch.tensor(B1)
-
-    self.w2 = torch.tensor(W2)
-    self.b2 = torch.tensor(B2)
-
-
-    self.LSM = nn.LogSoftmax(dim=0)
-    self.relu = nn.ReLU()
-
-  def forward(self, x):
-    x = torch.tensor(x)
-    x = x @ self.w1 + self.b1
-    x = self.relu(x)
-    x = x @ self.w2 + self.b2
-    x = self.LSM(x)
-    return x
-
-
-
-# torch handles NANs and infinites differently to the way we do 
-def train(xtrain, ytrain, model):
-  BS = 10
-  for ff in (t := trange(1)):
-    ind = np.random.randint(0,59000, size=BS) 
-    inp = xtrain[np.array([ind])[:]].reshape(BS,-1)
-    out = model.forward(inp).sum()
-
-
-    out.backward()
 
 
 model = bobnet()
-train(xtrain, ytrain, model)
+inp = np.random.randn(28,28)
+optim = SGD([model.w1, model.w2], lr = 1e-3)
+
+#def train(model, optim, xtrain, ytrain, lr):
+for jj in range(100):
+  out = model.forward(inp)
+
+  res = tensor([1,0,0,0,0,0,0,0,0,0])
+
+  loss = (-res * (out)).mean(axis=1).mean()
+
+  optim.zero_grad()
+  loss.backward()
+  optim.step()
+
+  print(loss.data[0])
+
+
 
 
 

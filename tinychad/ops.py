@@ -92,6 +92,13 @@ class LOG(OP):
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad / self.saved[0].data
 
+class NEG(OP): 
+  @staticmethod
+  def forward(x): return -1*x.data
+
+  def backward(self, out_grad, out): 
+    self.saved[0].grad += -1*out_grad
+
 class MAX(OP): 
   @staticmethod
   def forward(x, axis, keepdim): 
@@ -136,6 +143,9 @@ class CAST(OP):
   def forward(x, y): return np.broadcast_to(x.data, y)
 
   def backward(self, out_grad, out): 
+    # can we do this better?
+    #if self.saved[0].compute_grad == False: return
+
     shp, r = self.ctx, out_grad
     for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
       r = r.sum(axis=0)

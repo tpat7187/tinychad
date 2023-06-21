@@ -38,11 +38,16 @@ class tensor:
   def __matmul__(self,x): return self.dot(x)
   def __truediv__(self,x): return self.div(x)
 
+
+  def __neg__(self): return self.neg()
+
   def __radd__(self,x): return self.add(x)
   def __rsub__(self,x): return self.sub(x)
   def __rmul__(self,x): return self.mul(x)
 
   # binary ops
+  from typing import Union
+
   def add(self, x): return self.cast_op(ops.ADD, x) 
   def sub(self, x): return self.cast_op(ops.SUB, x) 
   def mul(self, x): return self.cast_op(ops.MUL, x) 
@@ -64,6 +69,13 @@ class tensor:
   # helpers
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
+
+  def mean(self, axis=None, keepdim=False): 
+    out = self.sum(axis=axis, keepdim=keepdim)
+    ss = out * (np.prod(out.shape) / np.prod(self.shape))
+    return ss
+
+  def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
 
   # from tinygrad
   def _softmax(self, axis): 
@@ -107,20 +119,25 @@ class tensor:
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
 
-  # preserves casting order
   def cast_op(self, fxn, x):
+    # should make sure that self and x are both tensors
+    # this code sucks tho
     x, y = self, x 
+    if isinstance(y, (float, int)):
+      y = tensor(y)
+    if isinstance(x, (float, int)):
+      x = tensor(x)
     if x.shape == y.shape: 
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
     cst, shp, ot, axis = castable(x,y)
+    # preserves casting order based on castable outputs
     if axis == 1: 
       cst = cst.cast(shp, ctx = shp)
     if axis == 0:
       ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
-# returns cast and output shape, sum axis idk if we need
-# castable checks cast decision returns cast target and shape target
+# returns cast, target, and buffer
 def castable(x, y): 
   assert is_castable(x,y), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)

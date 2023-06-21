@@ -7,11 +7,10 @@ goals:
   - recreate important deep learning architectures using tinychad (LSTM, RESNET, Transformer)
 
 TODO: 
-  - broadcasting rules for going backwards on unary ops (SUM, RESHAPE, MAX)
-    * need to do broadcasting when scaling dimensions (example: (128,) to (128,10))
-  - plot computation graph
-  - MNIST
-
+  - write actual unit tests for all forward and backward ops
+  - computation graph
+  - how does SUM, RESHAPE, MAX work for ndarrays?
+  - MNIST (write an optimizer)
 
 
 things to read: 
