@@ -42,22 +42,22 @@ class tensor:
   def __rsub__(self,x): return self.sub(x)
   def __rmul__(self,x): return self.mul(x)
 
-  # binary 
-  #def add(self, x): return tensor(ops.ADD.forward(self, x), op = ops.ADD(saved = [self, x]))
+  # binary ops
   def add(self, x): return self.cast_op(ops.ADD, x) 
   def sub(self, x): return self.cast_op(ops.SUB, x) 
   def mul(self, x): return self.cast_op(ops.MUL, x) 
   def div(self, x): return self.cast_op(ops.DIV, x)
 
+  # MATMUL
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
 
-  # unary
+  # unary ops
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
-  def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=axis))
+  def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
@@ -73,12 +73,10 @@ class tensor:
 
   # mlops
   def softmax(self, axis = -1):
-    m = self - self.max(axis = axis, keepdim=True)
-    e = m.exp()
-    ss = e.sum(axis=axis, keepdim=True)
+    # how does max axis affect what we're doing
+    _, e, ss = self._softmax(axis) 
     return e.div(ss)
  
-  #they both give correct output, something is wrong with the other ops, we should write tests
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
@@ -94,7 +92,6 @@ class tensor:
           topo.append(s)
     _toposort(self)
     
-    # should we include load ops
     return topo
 
   def backward(self):
@@ -110,12 +107,16 @@ class tensor:
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
 
+  # preserves casting order
   def cast_op(self, fxn, x):
     x, y = self, x 
     if x.shape == y.shape: 
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
     cst, shp, ot, axis = castable(x,y)
-    cst = cst.cast(shp, ctx = shp)
+    if axis == 1: 
+      cst = cst.cast(shp, ctx = shp)
+    if axis == 0:
+      ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
 # returns cast and output shape, sum axis idk if we need
@@ -124,9 +125,9 @@ def castable(x, y):
   assert is_castable(x,y), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)
   if x.shape != out:
-    return x, out, y, 0 
+    return x, out, y, 1
   if y.shape != out:
-    return y, out, x, 0
+    return x, out, y, 0
 
 def is_castable(x, y): 
   for a, b in zip(x.shape[::-1], y.shape[::-1]): 

@@ -6,23 +6,6 @@ class LOAD(OP):
     self.arg = type(self).__name__
     self.saved = saved
 
-# self and out_grad
-def _unbr(out_grad, saved):
-  def _unbroadcast(out_grad,saved):
-    return all((m==n) | (m==1) | (n==1) for n,m in \
-    zip(out_grad.shape[::-1], saved.shape[::-1]))
-  # if true, out_grad needs to be reshaped to saved
-  if _unbroadcast(out_grad, saved): 
-    if out_grad.shape == saved.shape:
-      return out_grad
-    else: 
-      out_grad = out_grad.sum(axis=1, keepdims = True)
-  return out_grad
-
-# takes in input tensor and output shape
-# checks if they're broadcastable
-# if they are then does the transformation
-
 # binary ops
 class ADD(OP): 
   @staticmethod
@@ -34,12 +17,12 @@ class ADD(OP):
 
 class SUB(OP): 
   @staticmethod
-  def forward(x, y): 
-    return x.data - y.data
+  def forward(x, y): return x.data - y.data
   
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad
-    self.saved[1].grad += out_grad
+    self.saved[1].grad += -out_grad
+
 
 class MATMUL(OP): 
   @staticmethod
@@ -80,7 +63,12 @@ class SUM(OP):
     if not isinstance(self.ctx, int):
       self.saved[0].grad += out_grad 
     else: 
-      self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
+      # TODO: generalize this for ndarrays
+      if self.ctx == 1:
+        ss = np.broadcast_to(out_grad.reshape(-1,1), self.saved[0].shape)
+      if self.ctx == 0:
+        ss = np.broadcast_to(out_grad, self.saved[0].shape)
+      self.saved[0].grad += ss
 
 class RELU(OP):
   @staticmethod
@@ -112,12 +100,26 @@ class MAX(OP):
     else:
       return x.data.max(axis=axis, keepdims = keepdim)
 
-  # TODO: fix this omegalul
-  # set the index of the maximum value to 1
+  # TODO: generalize this to ndarrays
   def backward(self, out_grad, out):
-    l = len(self.saved[0].data)
-    ind = np.unravel_index(out.argmax(), self.saved[0].shape)
-    self.saved[0].grad[ind] += 1 / l
+    axis, kd = self.ctx[0], self.ctx[1]
+    max_ind, inds = np.unravel_index(np.argmax(self.saved[0].data, axis=axis), self.saved[0].shape), []
+    max_1s = np.zeros(self.saved[0].shape)
+    if axis == 0:
+      for i, j in enumerate(max_ind[1]): 
+        inds.append((j,i))
+    if axis == 1:
+      for i, j in enumerate(max_ind[1]): 
+        inds.append((i,j))
+
+    r, c = zip(*inds)
+    max_1s[r,c] = 1
+
+    expand = np.ones((self.saved[0].shape))
+    max_amount = max_1s / expand
+
+    grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)
+    self.saved[0].grad += max_amount * grad_output_exp
 
 # shapes
 
@@ -128,20 +130,22 @@ class RESHAPE(OP):
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
 
-
-# prett unary i guess
+# TODO: once the shapes are equal, we need to find the axis to sum over to make them the same
 class CAST(OP):
   @staticmethod 
-  def forward(x, y):
-    return np.broadcast_to(x.data, y)
+  def forward(x, y): return np.broadcast_to(x.data, y)
 
   def backward(self, out_grad, out): 
     shp, r = self.ctx, out_grad
     for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
       r = r.sum(axis=0)
-    if len(r.shape) == len(self.saved[0].shape):
-      # TODO: is this cringe
-      r = r.sum(axis=0, keepdims = True)
+    if len(r.shape) == len(self.saved[0].shape) and len(r.shape)>1 and len(self.saved[0].shape)>1:
+      ss = 0 
+      for i,j in zip(r.shape, self.saved[0].shape): 
+        if i != j: 
+          break
+        ss+=1
+      r = r.sum(axis=ss, keepdims = True)
     self.saved[0].grad += r
 
 
@@ -151,12 +155,6 @@ IF THEY ARE NOT THE SAME SHAPE WE CHECK IF THEY ARE CASTBALE
 IF THEY ARE CASTABLE WE FIND OUT WHICH ONE NEEDS TO BE CAST 
 PERFORM CAST
 PERFORM ADD, ADD SAVED needs to take in <CAST> and <OTHER> 
-
-def add(self, x): return self.cast_ops(ops.ADD, x)
-def cast_ops(self, fxn, x):
-
-return tensor(ops.ADD.forward(x_s, y_s), op = ops.ADD(saved = [x_s, y_s]))
-
 '''
 
 
