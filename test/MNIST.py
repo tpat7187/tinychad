@@ -1,6 +1,6 @@
-sys.path.insert(1, '../')
 
 import sys
+sys.path.insert(1, '../')
 import numpy as np
 import torch.nn as nn
 import torch

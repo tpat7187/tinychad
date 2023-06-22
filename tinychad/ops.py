@@ -111,25 +111,14 @@ class MAX(OP):
     else:
       return x.data.max(axis=axis, keepdims = keepdim)
 
-  # TODO: generalize this to ndarrays
+  # TODO: document this better
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
-    #inds = []
-    max_ind, inds = np.unravel_index(np.argmax(self.saved[0].data, axis=axis), self.saved[0].shape), []
-    max_1s = np.zeros(self.saved[0].shape)
-    # 1's where max is chosen
-    amax = np.argmax(self.saved[0].data, axis=axis)
-    #inds.append(np.indices(amax.shape))
-    
-    if axis == 0:
-      for i, j in enumerate(max_ind[1]): 
-        inds.append((j,i))
-    if axis == 1:
-      for i, j in enumerate(max_ind[1]): 
-        inds.append((i,j))
 
-    r, c = zip(*inds)
-    max_1s[r,c] = 1
+    tt = np.broadcast_to(out.data, self.saved[0].shape)
+    # CMPEQ 
+    tt =(self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
+    max_1s = tt
 
     expand = np.broadcast_to(max_1s.sum(), self.saved[0].shape)
     max_amount = max_1s / expand
