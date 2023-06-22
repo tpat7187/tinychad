@@ -64,11 +64,15 @@ class SUM(OP):
       self.saved[0].grad += out_grad 
     else: 
       # TODO: generalize this for ndarrays
+      '''
       if self.ctx == 1:
         ss = np.broadcast_to(out_grad.reshape(-1,1), self.saved[0].shape)
       if self.ctx == 0:
         ss = np.broadcast_to(out_grad, self.saved[0].shape)
       self.saved[0].grad += ss
+      '''
+      # why did we change from this code earlier? 
+      self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
 
 class RELU(OP):
   @staticmethod
@@ -110,8 +114,13 @@ class MAX(OP):
   # TODO: generalize this to ndarrays
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
+    #inds = []
     max_ind, inds = np.unravel_index(np.argmax(self.saved[0].data, axis=axis), self.saved[0].shape), []
     max_1s = np.zeros(self.saved[0].shape)
+    # 1's where max is chosen
+    amax = np.argmax(self.saved[0].data, axis=axis)
+    #inds.append(np.indices(amax.shape))
+    
     if axis == 0:
       for i, j in enumerate(max_ind[1]): 
         inds.append((j,i))
@@ -122,7 +131,7 @@ class MAX(OP):
     r, c = zip(*inds)
     max_1s[r,c] = 1
 
-    expand = np.ones((self.saved[0].shape))
+    expand = np.broadcast_to(max_1s.sum(), self.saved[0].shape)
     max_amount = max_1s / expand
 
     grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)
