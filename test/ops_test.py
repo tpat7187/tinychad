@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import unittest
 
-# TODO: input shapes, reshape tests, casting tests
+# TODO: specify input shapes, casting tests
 def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     np.random.seed(0)
     N = np.random.randn(5,5).astype(np.float32)
@@ -15,8 +15,7 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     a, b = tensor(N, requires_grad = True), tensor(N, requires_grad = True)
     at, bt = torch.tensor(N, requires_grad = True), torch.tensor(N, requires_grad = True)
 
-
-    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.max, tensor.neg)
+    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean)
     BINARY_OPS = (tensor.add, tensor.sub, tensor.div, tensor.mul, tensor.dot, tensor.cast)
     RESHAPE_OPS = (tensor.reshape, None)
     CAST_OPS = (tensor.cast, None)
@@ -27,15 +26,15 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     if tinychadfxn in BINARY_OPS:
       x = tinychadfxn(a,b)
       xt = torchfxn(at,bt)
-
-
     if tinychadfxn in RESHAPE_OPS:
       x = tinychadfxn(a, *shapes)
       xt = torchfxn(at, (shapes))
-
     if tinychadfxn in CAST_OPS: 
       x = tinychadfxn(a, ctx = (shapes))
       xt = tinychadfxn(a, (shapes))
+    if tinychadfxn == tensor.max:
+      x = tinychadfxn(a, axis = axis) if axis != None else tinychadfxn(a)
+      xt = torchfxn(at, dim = axis).values if axis != None else torchfxn(at)
 
     try: 
       np.testing.assert_allclose(x.data, xt.detach().numpy(), atol =1e-6 , rtol =1e-3)
@@ -49,22 +48,24 @@ def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None):
     a, b = tensor(N, requires_grad = True), tensor(N, requires_grad = True)
     at, bt = torch.tensor(N, requires_grad = True), torch.tensor(N, requires_grad = True)
 
-    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.max, tensor.neg)
+    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean)
     BINARY_OPS = (tensor.add, tensor.sub, tensor.div, tensor.mul, tensor.dot)
     RESHAPE_OPS = (tensor.reshape, tensor.cast)
+    CAST_OPS = (tensor.cast, None)
+
 
     if tinychadfxn in UNARY_OPS:
       x = tinychadfxn(a, axis = axis).sum().backward() if axis != None else tinychadfxn(a).sum().backward()
       xt = torchfxn(at, axis = axis).sum().backward() if axis != None else torchfxn(at).sum().backward()
-
     if tinychadfxn in BINARY_OPS:
       x = tinychadfxn(a,b).sum().backward()
       xt = torchfxn(at, bt).sum().backward()
-
     if tinychadfxn in RESHAPE_OPS:
       x = tinychadfxn(a, *shapes).sum().backward()
       xt = torchfxn(at, (shapes)).sum().backward()
-
+    if tinychadfxn == tensor.max:
+      x = tinychadfxn(a, axis = axis).sum().backward() if axis != None else tinychadfxn(a).sum().backward()
+      xt = torchfxn(at, dim = axis).values.sum().backward() if axis != None else torchfxn(at).sum().backward()
 
     try: 
       np.testing.assert_allclose(a.grad, at.grad, atol=1e-6, rtol=1e-3)
@@ -99,8 +100,15 @@ class test_ops(unittest.TestCase):
   def test_relu_fw(self): return test_helper_fw(None, torch.relu, tensor.relu)
   def test_relu_bw(self): return test_helper_bw(None, torch.relu, tensor.relu)
 
-  def test_sum_fw(self): return test_helper_fw(None, torch.sum, tensor.sum)
-  def test_sum_bw(self): return test_helper_bw(None, torch.sum, tensor.sum)
+  def test_sum_fw(self): 
+    test_helper_fw(None, torch.sum, tensor.sum)
+    test_helper_fw(None, torch.sum, tensor.sum, axis = 0)
+    test_helper_fw(None, torch.sum, tensor.sum, axis = 1)
+
+  def test_sum_bw(self): 
+    test_helper_bw(None, torch.sum, tensor.sum)
+    test_helper_bw(None, torch.sum, tensor.sum, axis = 0)
+    test_helper_bw(None, torch.sum, tensor.sum, axis = 1)
 
   def test_exp_fw(self): return test_helper_fw(None, torch.exp, tensor.exp)
   def test_exp_bw(self): return test_helper_bw(None, torch.exp, tensor.exp)
@@ -108,26 +116,32 @@ class test_ops(unittest.TestCase):
   def test_log_fw(self): return test_helper_fw(None, torch.log, tensor.log)
   def test_log_bw(self): return test_helper_bw(None, torch.log, tensor.log)
 
-  def test_max_fw(self): return test_helper_fw(None, torch.max, tensor.max)
-  def test_max_bw(self): return test_helper_bw(None, torch.max, tensor.max)
-
   def test_neg_fw(self): return test_helper_fw(None, torch.neg, tensor.neg)
   def test_neg_bw(self): return test_helper_bw(None, torch.neg, tensor.neg)
 
   def test_reshape_fw(self): return test_helper_fw((-1,1), torch.reshape, tensor.reshape)
   def test_reshape_bw(self): return test_helper_bw((-1,1), torch.reshape, tensor.reshape)
 
-  def test_sum0_fw(self): return test_helper_fw(1, torch.sum, tensor.sum, axis=0)
-  def test_sum0_bw(self): return test_helper_bw(1, torch.sum, tensor.sum, axis=0)
-  def test_sum1_fw(self): return test_helper_fw(1, torch.sum, tensor.sum, axis=1)
-  def test_sum1_bw(self): return test_helper_bw(1, torch.sum, tensor.sum, axis=1)
+  def test_mean_fw(self): 
+    test_helper_fw(None, torch.mean, tensor.mean)
+    test_helper_fw(None, torch.mean, tensor.mean, axis=0)
+    test_helper_fw(None, torch.mean, tensor.mean, axis=1)
 
-  # how to test this, torch.max for axis != None does not return a tensor
+  def test_mean_bw(self):
+    test_helper_bw(None, torch.mean, tensor.mean)
+    test_helper_bw(None, torch.mean, tensor.mean, axis=0)
+    test_helper_bw(None, torch.mean, tensor.mean, axis=1)
+
+  def test_max_fw(self): 
+    test_helper_fw(None, torch.max, tensor.max)
+    test_helper_fw(None, torch.max, tensor.max, axis = 0)
+    test_helper_fw(None, torch.max, tensor.max, axis = 1)
+
   '''
-  def test_max0_fw(self): return test_helper_fw(1, torch.max, tensor.max, axis=0)
-  def test_max0_bw(self): return test_helper_bw(1, torch.max, tensor.max, axis=0)
-  def test_max1_fw(self): return test_helper_fw(1, torch.max, tensor.max, axis=1)
-  def test_max1_bw(self): return test_helper_bw(1, torch.max, tensor.max, axis=1)
+  def test_max_bw(self):
+    test_helper_bw(None, torch.max, tensor.max)
+    test_helper_bw(None, torch.max, tensor.max, axis = 0)
+    test_helper_bw(None, torch.max, tensor.max, axis = 1)
 
   TRY TO REMOVE NEED OF A CONTEXT
   def test_cast_fw(self): return test_helper_fw((5,5,5), torch.broadcast_to, tensor.cast)

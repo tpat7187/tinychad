@@ -63,15 +63,6 @@ class SUM(OP):
     if not isinstance(self.ctx, int):
       self.saved[0].grad += out_grad 
     else: 
-      # TODO: generalize this for ndarrays
-      '''
-      if self.ctx == 1:
-        ss = np.broadcast_to(out_grad.reshape(-1,1), self.saved[0].shape)
-      if self.ctx == 0:
-        ss = np.broadcast_to(out_grad, self.saved[0].shape)
-      self.saved[0].grad += ss
-      '''
-      # why did we change from this code earlier? 
       self.saved[0].grad += np.broadcast_to(out_grad, self.saved[0].grad.shape)
 
 class RELU(OP):
@@ -111,26 +102,33 @@ class MAX(OP):
     else:
       return x.data.max(axis=axis, keepdims = keepdim)
 
-  # TODO: document this better
+  # when we MAX something we reshape it, by casting it to its original size and comparing with its input we can see which values match
+  # matching values indicate where argmax found values along axis ; true -> 1, false -> 0
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
 
-    tt = np.broadcast_to(out.data, self.saved[0].shape)
+    # this argmax needs to return the correct shape, this is a temp hack
+    if axis==1:
+      tt = np.broadcast_to(out.data.T, self.saved[0].shape)
+    else: 
+      tt = np.broadcast_to(out.data, self.saved[0].shape)
+
     # CMPEQ 
-    tt =(self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
+    tt = (self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
     max_1s = tt
 
-    expand = np.broadcast_to(max_1s.sum(), self.saved[0].shape)
+    expand = np.broadcast_to(max_1s.sum(axis=axis), self.saved[0].shape)
     max_amount = max_1s / expand
 
     grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)
     self.saved[0].grad += max_amount * grad_output_exp
 
 # shapes
-
 class RESHAPE(OP): 
   @staticmethod 
-  def forward(x, *shape): return np.reshape(x.data, shape)
+  def forward(x, *shape):  return np.reshape(x.data, shape)
+
+
 
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
@@ -141,8 +139,7 @@ class CAST(OP):
   def forward(x, y): return np.broadcast_to(x.data, y)
 
   def backward(self, out_grad, out): 
-    # can we do this better?
-    #if self.saved[0].compute_grad == False: return
+    # can we do this better? do we need a ctx
 
     shp, r = self.ctx, out_grad
     for j in range(len(out_grad.shape) - len(self.saved[0].shape)):

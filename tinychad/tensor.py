@@ -61,7 +61,7 @@ class tensor:
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
-  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
+  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape),op = ops.RESHAPE(saved = [self,]))
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
