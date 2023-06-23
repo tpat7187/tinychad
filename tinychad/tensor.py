@@ -16,7 +16,7 @@ class tensor:
     self.grad = np.zeros(self.data.shape, dtype = np.float32)
 
   def ones(*shape): return tensor(np.ones(*shape))
-  def randn(*shape): return tensor(np.random.randn(*shape))
+  def randn(*shape): return tensor(np.random.randn(*shape), requires_grad = True)
   def eye(shape): return tensor(np.eye(shape))
   def zeros(*shape): return tensor(np.zeros(*shape))
 
@@ -39,7 +39,6 @@ class tensor:
   def __truediv__(self,x): return self.div(x)
   def __neg__(self): return self.neg()
 
-
   def __radd__(self,x): return self.add(x)
   def __rsub__(self,x): return self.sub(x).neg()
   def __rmul__(self,x): return self.mul(x)
@@ -52,7 +51,6 @@ class tensor:
 
   # MATMUL
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
-
   # unary ops
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
@@ -113,6 +111,9 @@ class tensor:
         in_s = list(n.shape for n in x.op.saved)
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
+
+      # once grads are passed on we zero them
+      x.grad = np.zeros(x.grad.shape)
 
   def cast_op(self, fxn, x):
     x, y = self, x 
