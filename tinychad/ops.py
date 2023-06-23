@@ -107,17 +107,17 @@ class MAX(OP):
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
 
-    # this argmax needs to return the correct shape, this is a temp hack
-    if axis==1:
-      tt = np.broadcast_to(out.data.T, self.saved[0].shape)
+    # broadcasting 'direction' changes depending on the axis we use
+    if axis == 1:
+      tt = np.broadcast_to(out.reshape(-1,1), self.saved[0].shape)
     else: 
-      tt = np.broadcast_to(out.data, self.saved[0].shape)
+      tt = np.broadcast_to(out, self.saved[0].shape)
 
     # CMPEQ 
     tt = (self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
     max_1s = tt
 
-    expand = np.broadcast_to(max_1s.sum(axis=axis), self.saved[0].shape)
+    expand = np.broadcast_to(max_1s.sum(axis=axis, keepdims = kd), self.saved[0].shape)
     max_amount = max_1s / expand
 
     grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)

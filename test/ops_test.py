@@ -137,17 +137,16 @@ class test_ops(unittest.TestCase):
     test_helper_fw(None, torch.max, tensor.max, axis = 0)
     test_helper_fw(None, torch.max, tensor.max, axis = 1)
 
-  '''
   def test_max_bw(self):
     test_helper_bw(None, torch.max, tensor.max)
     test_helper_bw(None, torch.max, tensor.max, axis = 0)
     test_helper_bw(None, torch.max, tensor.max, axis = 1)
 
+  '''
   TRY TO REMOVE NEED OF A CONTEXT
   def test_cast_fw(self): return test_helper_fw((5,5,5), torch.broadcast_to, tensor.cast)
   def test_cast_bw(self): return test_helper_bw((5,5,5), torch.broadcast_to, tensor.cast)
   '''
-
 
 if __name__ == "__main__": 
   unittest.main()
