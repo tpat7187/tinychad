@@ -37,17 +37,14 @@ class tensor:
   def __mul__(self,x): return self.mul(x)
   def __matmul__(self,x): return self.dot(x)
   def __truediv__(self,x): return self.div(x)
-
-
   def __neg__(self): return self.neg()
 
+
   def __radd__(self,x): return self.add(x)
-  def __rsub__(self,x): return self.sub(x)
+  def __rsub__(self,x): return self.sub(x).neg()
   def __rmul__(self,x): return self.mul(x)
 
   # binary ops
-  from typing import Union
-
   def add(self, x): return self.cast_op(ops.ADD, x) 
   def sub(self, x): return self.cast_op(ops.SUB, x) 
   def mul(self, x): return self.cast_op(ops.MUL, x) 
@@ -57,12 +54,15 @@ class tensor:
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
 
   # unary ops
-  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
+  def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
+
+  # reshapes
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape),op = ops.RESHAPE(saved = [self,]))
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
+  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
@@ -75,17 +75,13 @@ class tensor:
     ss = out * (np.prod(out.shape) / np.prod(self.shape))
     return ss
 
-  def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
-
   # from tinygrad
   def _softmax(self, axis): 
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp() 
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  # mlops
   def softmax(self, axis = -1):
-    # how does max axis affect what we're doing
     _, e, ss = self._softmax(axis) 
     return e.div(ss)
  
@@ -103,7 +99,6 @@ class tensor:
             _toposort(child)
           topo.append(s)
     _toposort(self)
-    
     return topo
 
   def backward(self):
@@ -120,13 +115,9 @@ class tensor:
       x.op.backward(x.grad, x.data)
 
   def cast_op(self, fxn, x):
-    # should make sure that self and x are both tensors
-    # this code sucks tho
     x, y = self, x 
-    if isinstance(y, (float, int)):
-      y = tensor(y)
-    if isinstance(x, (float, int)):
-      x = tensor(x)
+    y = y if isinstance(y, tensor) else tensor(y)
+    x = x if isinstance(x, tensor) else tensor(x)
     if x.shape == y.shape: 
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
     cst, shp, ot, axis = castable(x,y)

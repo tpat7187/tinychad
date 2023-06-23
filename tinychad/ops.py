@@ -113,7 +113,6 @@ class MAX(OP):
     else: 
       tt = np.broadcast_to(out, self.saved[0].shape)
 
-    # CMPEQ 
     tt = (self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
     max_1s = tt
 
