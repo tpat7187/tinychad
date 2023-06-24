@@ -3,18 +3,17 @@ tinychad be a deep learning framework, not a good deep learning framework
 it is gonna be slow, but its gonna be based
 
 goals: 
-  - write a compiler that compiles tinychad code into assmebly OR into something more based
+  - write a compiler that compiles tinychad code into WASM OR into something more based
   - recreate important deep learning architectures using tinychad (LSTM, RESNET, Transformer)
 
 TODO: 
-  - write actual unit tests for all forward and backward ops
-  - computation graph
-  - how does SUM, RESHAPE, MAX work for ndarrays?
-  - MNIST (write an optimizer)
-
+  * computation graph
+  * look into LLVMlite (how can we recreate matmul and other binary ops in LLVM IR)
+  * convolutions
+  * nn layers(?) instead of defining a (w+b) layer by two randn tensors we define something similar to nn.Linear
 
 things to read: 
-   - https://ai.stackexchange.com/questions/11643/how-should-i-implement-the-backward-pass-through-a-flatten-layer-of-a-cnn
-          ; "unbroadcasting (unflattening) during backpropogation"
+  - https://llvmlite.readthedocs.io/en/latest/ "llvmlite documentation" 
+
 
 

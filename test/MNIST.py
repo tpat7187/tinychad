@@ -20,7 +20,6 @@ B2 = np.random.randn(10).astype(np.float32)
 
 class bobnet(): 
   def __init__(self): 
-    ss = 1
     self.w1 = tensor(W1)
     self.b1 = tensor(B1)
 
@@ -56,7 +55,6 @@ def train(model, optim, xtrain, ytrain):
 
     optim.zero_grad()
     loss.backward()
-
     optim.step()
 
     t.set_description("loss %.6f acc %.2f" % (loss.data, acc / BS))
