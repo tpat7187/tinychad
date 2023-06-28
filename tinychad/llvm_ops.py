@@ -11,7 +11,7 @@ class LLVMcodegen:
     self.mod, self._bufs = ir.Module(), _bufs
     self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))])
     self.main = ir.Function(self.mod, self.fun_t, name = 'main')
-    
+
     self.main_block  = self.main.append_basic_block(name = 'main')
     self.main_builder = ir.IRBuilder(self.main_block)
 
@@ -19,34 +19,46 @@ class LLVMcodegen:
     self.out_builder = ir.IRBuilder(self.out_block)
     self.out_builder.ret_void()
 
-  def _compile(self): 
-    # end function calls / instructions
-    self.main_builder.branch(self.out_block)
+    self.args = self.main.args
 
-    input_ir = self.mod
-    llvm.initialize()
-    llvm.initialize_native_target()
-    llvm.initialize_native_asmprinter()
+# TODO: how can this work but _compile() doesnt work
+# if we use this function to return the llvmfunc it also segfaults
+def comp(llvmprg): 
+  _bufs = llvmprg._bufs
 
-    print(self.mod)
+  llvmprg.main_builder.branch(llvmprg.out_block)
+  input_ir = llvmprg.mod
+  llvm.initialize()
+  llvm.initialize_native_target()
+  llvm.initialize_native_asmprinter()
 
-    llvm_ir = str(input_ir)
+  llvm_ir = str(input_ir)
+
+  target = llvm.Target.from_default_triple()
+  target_machine = target.create_target_machine()
+  backing_mod = llvm.parse_assembly("") 
+  engine = llvm.create_mcjit_compiler(backing_mod, target_machine)
+  mod = llvm.parse_assembly(llvm_ir)
+  mod.verify()
+  engine.add_module(mod)
+  engine.finalize_object()
+  engine.run_static_constructors()
+
+  func_ptr = engine.get_function_address("main")
+
+  llvmfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(func_ptr)
+
+  x, y, r = _bufs
+
+  xp = x.ctypes.data_as(ctypes.c_void_p)
+  yp = y.ctypes.data_as(ctypes.c_void_p)
+  rp = r.ctypes.data_as(ctypes.c_void_p)
+
+  res = llvmfunc(xp, yp, rp)
+
+  print(x,y,r)
 
 
-    target = llvm.Target.from_default_triple()
-    target_machine = target.create_target_machine()
-    backing_mod = llvm.parse_assembly("") 
-    engine = llvm.create_mcjit_compiler(backing_mod, target_machine)
-    mod = llvm.parse_assembly(llvm_ir)
-    mod.verify()
-    engine.add_module(mod)
-    engine.finalize_object()
-    engine.run_static_constructors()
-
-    func_ptr = engine.get_function_address("main")
-    llvmfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_void_p for _ in self._bufs])(func_ptr)
-
-    return llvmfunc
 
 # should these be class methods?
 def _add(llvmcg, x, y, r):
@@ -55,14 +67,12 @@ def _add(llvmcg, x, y, r):
 
   _binaryOP(llvmcg.mod, x, y, r, ir.IRBuilder.fadd, addi)
 
-  x, y, r = addi.args
-
+  x, y, r = llvmcg.main.args
   llvmcg.main_builder.call(addi, (x,y,r))
 
 def _sub(mod, x, y, r):
   subi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t]) 
   subi = ir.Function(mod, subi_type, name = 'subi')
-
 
   _binaryOP(mod, x, y, r, ir.IRBuilder.fsub, subi)
 
@@ -83,6 +93,7 @@ def _binaryOP(mod, x, y, r, op, fxn):
   out_builder = ir.IRBuilder(out_block)
 
   inp_builder.branch(loop_block)
+  out_builder.ret_void()
 
   s_ptr = ir.Constant(ir.IntType(32), 0)
   e_ptr = ir.Constant(ir.IntType(32), 3)
@@ -102,7 +113,6 @@ def _binaryOP(mod, x, y, r, op, fxn):
 
   loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
 
-  out_builder.ret_void()
   return mod, fxn
 
 if __name__ == "__main__":
@@ -114,14 +124,8 @@ if __name__ == "__main__":
 
   _add(llvm_prg, x, y, r)
 
-  # convert to pointers
-  xp = x.ctypes.data_as(ctypes.c_void_p)
-  yp = y.ctypes.data_as(ctypes.c_void_p)
-  rp = r.ctypes.data_as(ctypes.c_void_p)
+  comp(llvm_prg)
 
-  llvmfunc = llvm_prg._compile()
-
-  res = llvmfunc(xp, yp, rp)
 
 
 
