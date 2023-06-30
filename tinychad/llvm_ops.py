@@ -34,52 +34,34 @@ def comp(llvmprg):
 
   llvm_ir = str(input_ir)
 
+  print(llvm_ir)
+
   target = llvm.Target.from_default_triple()
   target_machine = target.create_target_machine()
   backing_mod = llvm.parse_assembly("") 
   engine = llvm.create_mcjit_compiler(backing_mod, target_machine)
   mod = llvm.parse_assembly(llvm_ir)
   mod.verify()
-  engine.add_module(mod)
-  engine.finalize_object()
-  engine.run_static_constructors()
-
-  func_ptr = engine.get_function_address("main")
-
-  llvmfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(func_ptr)
-
-  x, y, r = _bufs
-
-  xp = x.ctypes.data_as(ctypes.c_void_p)
-  yp = y.ctypes.data_as(ctypes.c_void_p)
-  rp = r.ctypes.data_as(ctypes.c_void_p)
-
-  res = llvmfunc(xp, yp, rp)
-
-  print(x,y,r)
-
-
-
-# should these be class methods?
+ 
 def _add(llvmcg, x, y, r):
   addi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t]) 
-  addi = ir.Function(llvmcg.mod, addi_type, name = 'addi')
+  addi = ir.Function(llvmcg.mod, addi_type, name = f'addi_')
+
+  print(addi.name)
 
   _binaryOP(llvmcg.mod, x, y, r, ir.IRBuilder.fadd, addi)
-
-  x, y, r = llvmcg.main.args
   llvmcg.main_builder.call(addi, (x,y,r))
 
-def _sub(mod, x, y, r):
-  subi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t]) 
-  subi = ir.Function(mod, subi_type, name = 'subi')
 
-  _binaryOP(mod, x, y, r, ir.IRBuilder.fsub, subi)
+def _sub(llvmcg, x, y, r):
+  subi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t]) 
+  subi = ir.Function(llvmcg.mod, subi_type, name = f'subi_')
+  _binaryOP(llvmcg.mod, x, y, r, ir.IRBuilder.fsub, subi)
+  llvmcg.main_builder.call(subi, (x,y,r))
 
 def _mul(mod, x, y, r):
   muli_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t]) 
   muli = ir.Function(mod, muli_type, name = 'muli')
-
   _binaryOP(mod, x, y, r, ir.IRBuilder.fmul, muli)
 
 # get function name to work
@@ -96,7 +78,7 @@ def _binaryOP(mod, x, y, r, op, fxn):
   out_builder.ret_void()
 
   s_ptr = ir.Constant(ir.IntType(32), 0)
-  e_ptr = ir.Constant(ir.IntType(32), 3)
+  e_ptr = ir.Constant(ir.IntType(32), 9)
   idx = loop_builder.phi(ir.IntType(32))
   idx.add_incoming(s_ptr, inp_block)
 
@@ -116,21 +98,19 @@ def _binaryOP(mod, x, y, r, op, fxn):
   return mod, fxn
 
 if __name__ == "__main__":
-  x = np.ones((3))
-  y = np.ones((3))
-  r = np.zeros((3))
+  x = np.random.randn(3,3)
+  y = np.random.randn(3,3)
+  w = np.random.randn(3,3)
+  r = np.zeros((3,3))
+  r2 = np.zeros((3,3))
 
-  llvm_prg = LLVMcodegen([x,y,r])
+  llvm_prg = LLVMcodegen([x,y,r,w,r2])
+
+  x, y, r, w, r2 = llvm_prg.main.args
 
   _add(llvm_prg, x, y, r)
+  _sub(llvm_prg, r, w, r2)
 
   comp(llvm_prg)
 
 
-
-
-
-
-
-
-  

@@ -129,6 +129,16 @@ class tensor:
       ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
+
+class Linear: 
+  def __init__(self, in_shape, out_shape, bias=True):
+    self.w = tensor.randn(in_shape, out_shape)
+    self.b = tensor.randn(out_shape) if bias else None
+
+  def __call__(self, x): 
+    return x.dot(self.w) + self.b
+
+
 # returns cast, target, and buffer
 def castable(x, y): 
   assert is_castable(x,y), f"shapes {x.shape} and {y.shape} are not castable"
@@ -145,14 +155,5 @@ def is_castable(x, y):
     else: 
       return False
   return True
-
-
-
-
-
-  
-
-
-
 
 
