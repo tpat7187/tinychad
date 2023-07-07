@@ -143,16 +143,15 @@ class CAST(OP):
     self.saved[0].grad += r
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
+# 
 class SLICE(OP):
   @staticmethod
   def forward(x, args): 
-    out = x.data[args]
-    return np.array([out])
+    return x.data[args] if isinstance(args, (slice, tuple)) else np.array([x.data[args]])
 
   def backward(self, out_grad, out):
     arg = self.ctx[0]
     self.saved[0].grad[arg] += out_grad
-
 
 ''' 
 BINARY OPS
@@ -161,5 +160,3 @@ IF THEY ARE CASTABLE WE FIND OUT WHICH ONE NEEDS TO BE CAST
 PERFORM CAST
 PERFORM ADD, ADD SAVED needs to take in <CAST> and <OTHER> 
 '''
-
-
