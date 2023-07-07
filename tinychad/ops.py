@@ -143,7 +143,6 @@ class CAST(OP):
     self.saved[0].grad += r
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
-# 
 class SLICE(OP):
   @staticmethod
   def forward(x, args): 

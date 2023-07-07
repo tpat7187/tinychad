@@ -35,9 +35,7 @@ class tensor:
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.data.shape}: grad_shape = {self.grad.shape}"
 
-  # TODO: change this for slice ops
-  def __getitem__(self, args): 
-    return self.slice(args)
+  def __getitem__(self, args): return self.slice(args)
 
   def __add__(self,x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
@@ -49,6 +47,10 @@ class tensor:
   def __radd__(self,x): return self.add(x)
   def __rsub__(self,x): return self.sub(x).neg()
   def __rmul__(self,x): return self.mul(x)
+
+  def __iadd__(self,x): return self.add(x)
+  def __isub__(self,x): return self.sub(x)
+  def __imul__(self,x): return self.mul(x)
 
   # binary ops
   def add(self, x): return self.cast_op(ops.ADD, x) 
@@ -65,12 +67,13 @@ class tensor:
   def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
   def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
 
-  # reshapes
-  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
+  # shape ops (changes shape and content)
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
-  def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
 
+  # reshape ops (changes shape, content does not change)
+  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
+  def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
   # helpers
@@ -82,7 +85,6 @@ class tensor:
     ss = out * (np.prod(out.shape) / np.prod(self.shape))
     return ss
 
-  # from tinygrad
   def _softmax(self, axis): 
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp() 
@@ -96,7 +98,7 @@ class tensor:
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
 
-  # TODO: how does slicing effect grad
+  # TODO: how to connect to computation graph
   def conv2d(self, in_c, out_c, kernel_size):
     kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
     in_s = self.shape
@@ -106,8 +108,8 @@ class tensor:
       for y in range(out_s[0]): 
         for x in range(out_s[1]): 
           r = self[:, y:y+kernel.shape[0], x:x+kernel.shape[1]]
-          out[y, x, j] = (r.mul(kernel)).sum()
-    return 
+          out[y, x, j].data = (r.mul(kernel)).sum().data
+    return out
 
   def toposort(self): 
     topo, vis = [], []
@@ -129,12 +131,10 @@ class tensor:
     for x in reversed(self.toposort()): 
       assert x.grad.shape == x.shape, \
         f"grad shape must match tensor shape in {x.grad.shape} != {x.shape} on {x.op.arg}"
-      if DEBUG == "1":
+      if DEBUG:
         in_s = list(n.shape for n in x.op.saved)
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
-
-      # once grads are passed on we zero them
       x.grad = np.zeros(x.grad.shape)
 
   def cast_op(self, fxn, x):
@@ -151,7 +151,6 @@ class tensor:
       ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
-
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
     self.w = tensor.randn(in_shape, out_shape)
@@ -160,10 +159,9 @@ class Linear:
   def __call__(self, x): 
     return x.dot(self.w) + self.b
 
-
 # returns cast, target, and buffer
 def castable(x, y): 
-  assert is_castable(x,y), f"shapes {x.shape} and {y.shape} are not castable"
+  assert is_castable(x.shape,y.shape), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)
   if x.shape != out:
     return x, out, y, 1
@@ -171,7 +169,7 @@ def castable(x, y):
     return x, out, y, 0
 
 def is_castable(x, y): 
-  for a, b in zip(x.shape[::-1], y.shape[::-1]): 
+  for a, b in zip(x[::-1], y[::-1]): 
     if a == 1 or b == 1 or a == b:
       pass
     else: 

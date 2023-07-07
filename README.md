@@ -9,8 +9,9 @@ goals:
 TODO: 
   * computation graph
   * look into LLVMlite (how can we recreate matmul and other binary ops in LLVM IR)
+    * lazy evaluation-esque runtime for assigning buffers and shapes
   * convolutions
-  * nn layers(?) instead of defining a (w+b) layer by two randn tensors we define something similar to nn.Linear
+    * should conv be its own operation
 
 things to read: 
   - https://llvmlite.readthedocs.io/en/latest/ "llvmlite documentation" 
