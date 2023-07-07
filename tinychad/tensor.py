@@ -7,6 +7,9 @@ class OP:
     self.saved = np.array(saved)
     self.ctx = ctx
 
+  def forward(x, y): return f"forward not implemented for {self.arg}" 
+  def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
+
 import tinychad.ops as ops
 
 #### TENSOR CLASS ####
@@ -32,8 +35,9 @@ class tensor:
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.data.shape}: grad_shape = {self.grad.shape}"
 
-  # TODO: verify if cringe
-  def __getitem__(self, args): return tensor(self.data[args])
+  # TODO: change this for slice ops
+  def __getitem__(self, args): 
+    return self.slice(args)
 
   def __add__(self,x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
@@ -62,9 +66,10 @@ class tensor:
   def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
 
   # reshapes
-  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape),op = ops.RESHAPE(saved = [self,]))
+  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
+  def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 

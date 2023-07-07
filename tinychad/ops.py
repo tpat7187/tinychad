@@ -102,23 +102,16 @@ class MAX(OP):
     else:
       return x.data.max(axis=axis, keepdims = keepdim)
 
-  # when we MAX something we reshape it, by casting it to its original size and comparing with its input we can see which values match
-  # matching values indicate where argmax found values along axis ; true -> 1, false -> 0
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
-
     # broadcasting 'direction' changes depending on the axis we use
     if axis == 1:
       tt = np.broadcast_to(out.reshape(-1,1), self.saved[0].shape)
     else: 
       tt = np.broadcast_to(out, self.saved[0].shape)
-
     tt = (self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
-    max_1s = tt
-
-    expand = np.broadcast_to(max_1s.sum(axis=axis, keepdims = kd), self.saved[0].shape)
-    max_amount = max_1s / expand
-
+    expand = np.broadcast_to(tt.sum(axis=axis, keepdims = kd), self.saved[0].shape)
+    max_amount = tt / expand
     grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)
     self.saved[0].grad += max_amount * grad_output_exp
 
@@ -126,8 +119,6 @@ class MAX(OP):
 class RESHAPE(OP): 
   @staticmethod 
   def forward(x, *shape):  return np.reshape(x.data, shape)
-
-
 
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
@@ -139,7 +130,6 @@ class CAST(OP):
 
   def backward(self, out_grad, out): 
     # can we do this better? do we need a ctx
-
     shp, r = self.ctx, out_grad
     for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
       r = r.sum(axis=0)
@@ -151,6 +141,17 @@ class CAST(OP):
         ss+=1
       r = r.sum(axis=ss, keepdims = True)
     self.saved[0].grad += r
+
+# we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
+class SLICE(OP):
+  @staticmethod
+  def forward(x, args): 
+    out = x.data[args]
+    return np.array([out])
+
+  def backward(self, out_grad, out):
+    arg = self.ctx[0]
+    self.saved[0].grad[arg] += out_grad
 
 
 ''' 
