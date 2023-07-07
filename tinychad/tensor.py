@@ -32,6 +32,9 @@ class tensor:
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.data.shape}: grad_shape = {self.grad.shape}"
 
+  # TODO: verify if cringe
+  def __getitem__(self, args): return tensor(self.data[args])
+
   def __add__(self,x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
   def __mul__(self,x): return self.mul(x)
@@ -51,6 +54,7 @@ class tensor:
 
   # MATMUL
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
+
   # unary ops
   def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
   def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
@@ -86,6 +90,19 @@ class tensor:
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
+
+  # TODO: how does slicing effect grad
+  def conv2d(self, in_c, out_c, kernel_size):
+    kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
+    in_s = self.shape
+    out_s = (max(in_s)-max(kernel.shape)+1, max(in_s)-max(kernel.shape)+1, out_c)
+    out = tensor.zeros(out_s)
+    for j in range(out_c):
+      for y in range(out_s[0]): 
+        for x in range(out_s[1]): 
+          r = self[:, y:y+kernel.shape[0], x:x+kernel.shape[1]]
+          out[y, x, j] = (r.mul(kernel)).sum()
+    return 
 
   def toposort(self): 
     topo, vis = [], []
