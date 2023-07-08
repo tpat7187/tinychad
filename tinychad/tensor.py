@@ -71,10 +71,11 @@ class tensor:
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
   def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
 
-  # reshape ops (changes shape, content does not change)
+  # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
+  def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,]))
 
   # helpers
   def T(self): return tensor(self.data.transpose())
@@ -98,17 +99,11 @@ class tensor:
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
 
-  # TODO: how to connect to computation graph
+  # CONV as a matmul: reshape -> matmul (sparse kernel) -> reshape
   def conv2d(self, in_c, out_c, kernel_size):
-    kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
-    in_s = self.shape
-    out_s = (max(in_s)-max(kernel.shape)+1, max(in_s)-max(kernel.shape)+1, out_c)
-    out = tensor.zeros(out_s)
-    for j in range(out_c):
-      for y in range(out_s[0]): 
-        for x in range(out_s[1]): 
-          r = self[:, y:y+kernel.shape[0], x:x+kernel.shape[1]]
-          out[y, x, j].data = (r.mul(kernel)).sum().data
+    kernel = tensor.randn(1,1,kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
+    tplz = kernel.sparse(*self.shape)
+    out = self.reshape(-1,).dot(tplz)
     return out
 
   def toposort(self): 
