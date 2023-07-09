@@ -148,36 +148,16 @@ class SLICE(OP):
 
 class PAD(OP): 
   @staticmethod 
-<<<<<<< HEAD
-  def forward(x, args): 
+  def forward(x, args):
     assert isinstance(args, tuple)
-    out = np.pad(x.data, pad_width=args, mode = 'constant')
-=======
-  def forward(x, args, axis): 
-    args if isinstance(args, tuple) else (0,args)
-    print(args)
-    p_w, axis = args, axis
-    s = [(0,0) for x in range(len(x.shape))]
-    s[axis] = args 
-    #print(s)
-    out = np.pad(x.data, pad_width=s, mode = 'constant')
->>>>>>> 38e38ca8480bc0f60ae260f2fb043c00f56d6543
+    out = np.pad(x.data, pad_width=args, mode='constant')
     return out
 
   def backward(self, out_grad, out): 
-<<<<<<< HEAD
     w = [] 
     for i,j in zip(self.ctx, out.shape):
       w.append(slice(i[0], j-i[1], None))
     self.saved[0].grad += out_grad[tuple(w)]
-=======
-    args = self.ctx[0][0]
-    axis = self.ctx[1]
-    s = [(0,0) for x in range(len(self.saved[0].shape))]
-    s[axis] = args
-    test = out_grad[s[0][0]:-s[0][0], s[1][1]:-s[1][1]]
-    pass
->>>>>>> 38e38ca8480bc0f60ae260f2fb043c00f56d6543
 
 
 # input: kernel and conv2d input shape, output toeplitz matrix
