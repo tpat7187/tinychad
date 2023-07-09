@@ -117,6 +117,10 @@ class tensor:
     ot = args[0].pad((0,self.shape[0]), axis = dim)
     return s + ot
 
+  def unsqueeze(self, axis): 
+    dim = (self.shape[:axis] + (1,) + self.shape[axis:])
+    return self.reshape(*dim)
+
 
   def toposort(self): 
     topo, vis = [], []

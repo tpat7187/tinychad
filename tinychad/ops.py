@@ -150,15 +150,23 @@ class PAD(OP):
   @staticmethod 
   def forward(x, args, axis): 
     args if isinstance(args, tuple) else (0,args)
+    print(args)
     p_w, axis = args, axis
     s = [(0,0) for x in range(len(x.shape))]
     s[axis] = args 
+    #print(s)
     out = np.pad(x.data, pad_width=s, mode = 'constant')
     return out
 
   # TODO: slice grad to original size
   def backward(self, out_grad, out): 
+    args = self.ctx[0][0]
+    axis = self.ctx[1]
+    s = [(0,0) for x in range(len(self.saved[0].shape))]
+    s[axis] = args
+    test = out_grad[s[0][0]:-s[0][0], s[1][1]:-s[1][1]]
     pass
+
 
 # input: kernel and conv2d input shape, output toeplitz matrix
 # fns: concatonate, slice, reshape, pad
