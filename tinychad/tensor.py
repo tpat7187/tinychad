@@ -19,7 +19,7 @@ class tensor:
     self.grad = np.zeros(self.data.shape, dtype = np.float32)
 
   def ones(*shape): return tensor(np.ones(*shape))
-  def randn(*shape): return tensor(np.random.randn(*shape), requires_grad = True)
+  def randn(*shape): return tensor(np.random.randn(*shape))
   def eye(shape): return tensor(np.eye(shape))
   def zeros(*shape): return tensor(np.zeros(*shape))
 
@@ -58,6 +58,8 @@ class tensor:
   def mul(self, x): return self.cast_op(ops.MUL, x) 
   def div(self, x): return self.cast_op(ops.DIV, x)
 
+  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
+
   # MATMUL
   def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
 
@@ -74,7 +76,7 @@ class tensor:
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
-  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
+  def pad(self, *args, axis): return tensor(ops.PAD.forward(self, *args, axis), op = ops.PAD(saved = [self,], ctx = [args, axis]))
   def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,]))
 
   # helpers
@@ -105,6 +107,16 @@ class tensor:
     tplz = kernel.sparse(*self.shape)
     out = self.reshape(-1,).dot(tplz)
     return out
+
+  # combine tensors along axis: PAD to output shape -> ADD
+  # TODO: work for multiple args
+  def cat(self, *args, dim=0):  
+    assert all(len(x.shape) == len(self.shape) for x in args)
+    #extend self along dim, extend args along dim, then concatonate
+    s = self.pad((self.shape[0],0), axis = dim)
+    ot = args[0].pad((0,self.shape[0]), axis = dim)
+    return s + ot
+
 
   def toposort(self): 
     topo, vis = [], []
