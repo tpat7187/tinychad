@@ -76,7 +76,7 @@ class tensor:
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
-  def pad(self, *args, axis): return tensor(ops.PAD.forward(self, *args, axis), op = ops.PAD(saved = [self,], ctx = [args, axis]))
+  def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
   def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,]))
 
   # helpers
@@ -108,15 +108,14 @@ class tensor:
     out = self.reshape(-1,).dot(tplz)
     return out
 
-  # combine tensors along axis: PAD to output shape -> ADD
-  # TODO: work for multiple args
+  # TODO: incoporate dimension: build padding based on args
   def cat(self, *args, dim=0):  
     assert all(len(x.shape) == len(self.shape) for x in args)
-    #extend self along dim, extend args along dim, then concatonate
-    s = self.pad((self.shape[0],0), axis = dim)
-    ot = args[0].pad((0,self.shape[0]), axis = dim)
+    wt = ((0, self.shape[0]), (0,0))
+    wp = ((self.shape[0], 0), (0,0))
+    s = self.pad(wt)
+    ot = args[0].pad(wp)
     return s + ot
-
 
   def toposort(self): 
     topo, vis = [], []

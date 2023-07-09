@@ -148,17 +148,16 @@ class SLICE(OP):
 
 class PAD(OP): 
   @staticmethod 
-  def forward(x, args, axis): 
-    args if isinstance(args, tuple) else (0,args)
-    p_w, axis = args, axis
-    s = [(0,0) for x in range(len(x.shape))]
-    s[axis] = args 
-    out = np.pad(x.data, pad_width=s, mode = 'constant')
+  def forward(x, args): 
+    assert isinstance(args, tuple)
+    out = np.pad(x.data, pad_width=args, mode = 'constant')
     return out
 
-  # TODO: slice grad to original size
   def backward(self, out_grad, out): 
-    pass
+    w = [] 
+    for i,j in zip(self.ctx, out.shape):
+      w.append(slice(i[0], j-i[1], None))
+    self.saved[0].grad += out_grad[tuple(w)]
 
 # input: kernel and conv2d input shape, output toeplitz matrix
 # fns: concatonate, slice, reshape, pad
