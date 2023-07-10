@@ -116,25 +116,30 @@ class tensor:
     out_shape, args = list(self.shape), list(args)
     out_shape[axis] = out_shape[axis]*(len(args)+1)
     out_t = [[0,0] for _ in range(len(self.shape))]
-    out_t[axis][1] = args[0].shape[0] * len(args)
+    out_t[axis][1] = args[0].shape[axis] * len(args)
     out = self.pad(out_t)
     for j in range(len(args)): 
       args[j] = args[j].pad(out_t).roll((j+1)*args[j].shape[axis], axis)
       out += args[j]
     return out
 
-  # input padded kernel, output doubly blocked circulant matrix
-  def tpltz(self):
-    blocks = []
+  # input padded kernel and input size, output doubly blocked circulant matrix
+  # for building blocks: reshape to column, then roll and pad
+  def tpltz(self, input_size):
+    print(self.shape[0])
+    blocks, tpltz =  [], []
     for j in  range(self.shape[0]):
-      r = self[j,:].unsqueeze(0)
+      r = self[j,:].unsqueeze(0).reshape(-1,1)
       rl = [] 
-      for j in range(r.shape[1]-1):
-        rl.append(r.roll(j+1, axis=1))
-      block = r.cat(*rl)
-      #blocks.append(r.cat(*rl))
-    print(block.data)
-    return block
+      for j in range(r.shape[0]-2):
+        rl.append(r.roll(j+1, axis=0))
+      blocks.append(r.cat(*rl, axis=1))
+    blocks = blocks[::-1]
+    block = tensor.cat(*[_ for _ in blocks], axis=0)
+    for _ in range(input_size[1]):
+      tpltz.append(block.roll(_*self.shape[1], axis=0))
+    out = tensor.cat(*[_ for _ in tpltz], axis=1)
+    return out
 
   def unsqueeze(self, axis): 
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
