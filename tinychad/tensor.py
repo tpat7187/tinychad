@@ -123,6 +123,19 @@ class tensor:
       out += args[j]
     return out
 
+  # input padded kernel, output doubly blocked circulant matrix
+  def tpltz(self):
+    blocks = []
+    for j in  range(self.shape[0]):
+      r = self[j,:].unsqueeze(0)
+      rl = [] 
+      for j in range(r.shape[1]-1):
+        rl.append(r.roll(j+1, axis=1))
+      block = r.cat(*rl)
+      #blocks.append(r.cat(*rl))
+    print(block.data)
+    return block
+
   def unsqueeze(self, axis): 
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
     return self.reshape(*dim)
