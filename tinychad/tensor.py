@@ -16,7 +16,7 @@ import tinychad.ops as ops
 class tensor: 
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
     self.data, self.op = np.array(data, dtype = np.float32), op
-    self.grad = np.zeros(self.data.shape, dtype = np.float32)
+    self.grad, self.requires_grad = np.zeros(self.data.shape, dtype = np.float32), requires_grad
 
   def ones(*shape): return tensor(np.ones(*shape))
   def randn(*shape): return tensor(np.random.randn(*shape))
@@ -77,7 +77,10 @@ class tensor:
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
   def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
-  def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,]))
+  def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
+
+  # tpltzz transform is a pad -> roll -> cat
+  def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,])) # change this to tpltz
 
   # helpers
   def T(self): return tensor(self.data.transpose())
@@ -108,14 +111,17 @@ class tensor:
     out = self.reshape(-1,).dot(tplz)
     return out
 
-  # TODO: incoporate dimension: build padding based on args
-  def cat(self, *args, dim=0):  
+  def cat(self, *args, axis=0):  
     assert all(len(x.shape) == len(self.shape) for x in args)
-    wt = ((0, self.shape[0]), (0,0))
-    wp = ((self.shape[0], 0), (0,0))
-    s = self.pad(wt)
-    ot = args[0].pad(wp)
-    return s + ot
+    out_shape, args = list(self.shape), list(args)
+    out_shape[axis] = out_shape[axis]*(len(args)+1)
+    out_t = [[0,0] for _ in range(len(self.shape))]
+    out_t[axis][1] = args[0].shape[0] * len(args)
+    out = self.pad(out_t)
+    for j in range(len(args)): 
+      args[j] = args[j].pad(out_t).roll((j+1)*args[j].shape[axis], axis)
+      out += args[j]
+    return out
 
   def unsqueeze(self, axis): 
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
@@ -145,7 +151,7 @@ class tensor:
         in_s = list(n.shape for n in x.op.saved)
         print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
-      x.grad = np.zeros(x.grad.shape)
+      x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
   def cast_op(self, fxn, x):
     x, y = self, x 

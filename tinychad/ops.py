@@ -149,7 +149,7 @@ class SLICE(OP):
 class PAD(OP): 
   @staticmethod 
   def forward(x, args):
-    assert isinstance(args, tuple)
+    assert isinstance(args, (tuple, list))
     out = np.pad(x.data, pad_width=args, mode='constant')
     return out
 
@@ -159,6 +159,14 @@ class PAD(OP):
       w.append(slice(i[0], j-i[1], None))
     self.saved[0].grad += out_grad[tuple(w)]
 
+class ROLL(OP): 
+  @staticmethod
+  def forward(x, shift, axis): 
+    return np.roll(x.data, shift, axis)
+
+  def backward(self, out_grad, out): 
+    shift, axis = self.ctx
+    self.saved[0].grad += np.roll(out_grad, -shift, axis)
 
 # input: kernel and conv2d input shape, output toeplitz matrix
 # fns: concatonate, slice, reshape, pad
