@@ -78,9 +78,7 @@ class tensor:
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
   def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
   def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
-
-  # tpltzz transform is a pad -> roll -> cat
-  def sparse(self, *shape) : return tensor(ops.SPARSE.forward(self, *shape), op = ops.SPARSE(saved = [self,])) # change this to tpltz
+  def flip(self, axis): return tensor(ops.FLIP.forward(self, axis), op = ops.FLIP(saved = [self,], ctx = axis))
 
   # helpers
   def T(self): return tensor(self.data.transpose())
@@ -105,11 +103,21 @@ class tensor:
     return m - ss.log()
 
   # CONV as a matmul: reshape -> matmul (sparse kernel) -> reshape
+  # How to handle multiple channels + filters
   def conv2d(self, in_c, out_c, kernel_size):
-    kernel = tensor.randn(1,1,kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
-    tplz = kernel.sparse(*self.shape)
-    out = self.reshape(-1,).dot(tplz)
+    kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
+    out_s = (kernel.shape[0]+self.shape[0]-1, kernel.shape[1]+self.shape[1]-1)
+    kernel = kernel.pad_to(out_s).tpltz(self.shape)
+    out = kernel.dot(self.reshape(-1,1)).flip(1).reshape(*out_s)
     return out
+
+  def pad_to(self, shape): 
+    in_s, o_s, ss = self.shape, shape, 0
+    p_w = [[0,0] for _ in range(len(self.shape))]
+    for i,j in zip(self.shape, shape):
+      p_w[ss][1] = j-i
+      ss+=1 # cringe code please fix
+    return self.pad(p_w)
 
   def cat(self, *args, axis=0):  
     assert all(len(x.shape) == len(self.shape) for x in args)
@@ -124,19 +132,17 @@ class tensor:
     return out
 
   # input padded kernel and input size, output doubly blocked circulant matrix
-  # for building blocks: reshape to column, then roll and pad
   def tpltz(self, input_size):
-    print(self.shape[0])
     blocks, tpltz =  [], []
     for j in  range(self.shape[0]):
-      r = self[j,:].unsqueeze(0).reshape(-1,1)
+      r = self[j,:].reshape(-1,1)
       rl = [] 
       for j in range(r.shape[0]-2):
         rl.append(r.roll(j+1, axis=0))
       blocks.append(r.cat(*rl, axis=1))
     blocks = blocks[::-1]
     block = tensor.cat(*[_ for _ in blocks], axis=0)
-    for _ in range(input_size[1]):
+    for _ in range(input_size[0]):
       tpltz.append(block.roll(_*self.shape[1], axis=0))
     out = tensor.cat(*[_ for _ in tpltz], axis=1)
     return out

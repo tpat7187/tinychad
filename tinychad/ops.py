@@ -168,27 +168,16 @@ class ROLL(OP):
     shift, axis = self.ctx
     self.saved[0].grad += np.roll(out_grad, -shift, axis)
 
-# input: kernel and conv2d input shape, output toeplitz matrix
-# fns: concatonate, slice, reshape, pad
-# assert that the input shape is 4d
-class SPARSE(OP): 
+class FLIP(OP): 
   @staticmethod
-  def forward(x, *shape):
-    _, _, kp, kq = x.shape
-    _, _, xp, xq = shape
-    pd_w = ((0,0),(0,0),(0,0),(0,xq-kq))
-    pd = np.pad(x.data, pad_width = pd_w, mode = 'constant').reshape(-1,) # pad + reshape
-    r = np.zeros(xq-kq+1)
-    r[0] = x.data[0,0,0,0] # slice
-    vr = np.concatenate((pd, r[1:])) #cat
-    indx = np.arange(0, xq-kq+1) + np.expand_dims(np.arange(pd.shape[0]-1,-1,-1), 1) 
-    indx = np.flip(indx, axis=[0]) # flip
-    out = vr[indx] # idx
-    return out
+  def forward(x, axis):
+    return np.flip(x.data, axis=axis)
 
-  def backward(x, *shape):
-    pass
-    # TODO: implement IDX(CAT(SLICE, RESHAPE(PAD)))
+  def backward(self, out_grad, out):
+    self.saved[0].grad += np.flip(out_grad, axis=-self.ctx)
+
+
+
 
 
 
