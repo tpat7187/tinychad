@@ -108,21 +108,20 @@ class tensor:
     return m - ss.log()
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
-  def conv2d(self, in_c, out_c, kernel_size, padding = 1):
-    f_h, f_w = self.shape[2], self.shape[3]
+  def conv2d(self, in_c, out_c, kernel_size, padding = 1, stride = 1):
     k_ = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+    f_h, f_w = k_[0], k_[1]
 
     out_h = (self.shape[3] + 2 * padding - k_[0] + 1)
     out_w = (self.shape[2] + 2 * padding - k_[1] + 1)
 
     kernel = tensor.ones(k_)
-    k, i, j = self.get_im2col_indices(*k_)
+    k, i, j = self.get_im2col_indices(kernel.shape[0], kernel.shape[1], padding=padding, stride=stride)
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j]
-    C = self.shape[0]
+    C = self.shape[1]
     cols = cols.transpose(1,2,0).reshape(f_h * f_w * C, -1)
-    print(kernel.reshape(1,-1).shape, cols.shape)
-    out = (kernel.reshape(1,-1)).dot(cols).reshape(in_c, 1, out_w, out_h)
+    out = (kernel.reshape(1,-1)).dot(cols).reshape(1, 1, out_w, out_h)
     return out
 
   # input image im2col
