@@ -1,5 +1,11 @@
 import numpy as np
 from tinychad.tensor import OP
+from enum import Enum, auto
+
+class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto();
+class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); # matmul :( 
+class ShapeOPS(Enum): MAX = auto(); SUM = auto();
+class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); ROLL = auto(); FLIP() = auto();
 
 class LOAD(OP): 
   def __init__(self, saved = None):
@@ -175,8 +181,6 @@ class FLIP(OP):
 
   def backward(self, out_grad, out):
     self.saved[0].grad += np.flip(out_grad, axis=-self.ctx)
-
-
 
 
 

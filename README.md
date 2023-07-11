@@ -11,10 +11,11 @@ TODO:
   * look into LLVMlite (how can we recreate matmul and other binary ops in LLVM IR)
     * lazy evaluation-esque runtime for assigning buffers and shapes
   * convolutions
-    * should conv be its own operation
+    * our conv crashes for large images (128+)
 
 things to read: 
   - https://llvmlite.readthedocs.io/en/latest/ "llvmlite documentation" 
+  - https://stackoverflow.com/questions/16798888/2-d-convolution-as-a-matrix-matrix-multiplication
 
 
 

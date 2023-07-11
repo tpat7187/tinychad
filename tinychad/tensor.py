@@ -23,6 +23,9 @@ class tensor:
   def eye(shape): return tensor(np.eye(shape))
   def zeros(*shape): return tensor(np.zeros(*shape))
 
+  def to_lazy(self): 
+    return lazytensor(self)
+
   @property
   def shape(self): return self.data.shape
 
@@ -103,11 +106,10 @@ class tensor:
     return m - ss.log()
 
   # CONV as a matmul: reshape -> matmul (sparse kernel) -> reshape
-  # How to handle multiple channels + filters
   def conv2d(self, in_c, out_c, kernel_size):
     kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
     out_s = (kernel.shape[0]+self.shape[0]-1, kernel.shape[1]+self.shape[1]-1)
-    kernel = kernel.pad_to(out_s).tpltz(self.shape)
+    kernel = kernel.pad_to(out_s).tpltz(self.shape, kernel.shape)
     out = kernel.dot(self.reshape(-1,1)).flip(1).reshape(*out_s)
     return out
 
@@ -132,12 +134,12 @@ class tensor:
     return out
 
   # input padded kernel and input size, output doubly blocked circulant matrix
-  def tpltz(self, input_size):
+  def tpltz(self, input_size, kernel_size):
     blocks, tpltz =  [], []
     for j in  range(self.shape[0]):
       r = self[j,:].reshape(-1,1)
       rl = [] 
-      for j in range(r.shape[0]-2):
+      for j in range(r.shape[0]-kernel_size[0]):
         rl.append(r.roll(j+1, axis=0))
       blocks.append(r.cat(*rl, axis=1))
     blocks = blocks[::-1]
@@ -156,6 +158,7 @@ class tensor:
     def _toposort(s): 
       if s not in vis: 
         vis.append(s)
+
         if not isinstance(s.op, ops.LOAD):
           for child in s.op.saved: 
             _toposort(child)
@@ -191,6 +194,21 @@ class tensor:
       ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
+class lazytensor:
+  def __init__(self, tensor):
+    self.tensor = tensor
+    self.cache = []
+    self.shape = tensor.shape
+
+  def lazy_oper(self, fxn, *args):
+    if fxn is ops.BinaryOPS:
+      self.cache.append([fxn, self.tensor, args.tensor])
+    if fxn == ops.UnaryOPS:
+      self.cache.append([fxn, self.tensor])
+
+  def __add__(self, x): 
+    return self.lazy_oper(ops.BinaryOPS.ADD, x) 
+
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
     self.w = tensor.randn(in_shape, out_shape)
@@ -215,5 +233,4 @@ def is_castable(x, y):
     else: 
       return False
   return True
-
 
