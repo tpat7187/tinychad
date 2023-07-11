@@ -23,8 +23,7 @@ class tensor:
   def eye(shape): return tensor(np.eye(shape))
   def zeros(*shape): return tensor(np.zeros(*shape))
 
-  def to_lazy(self): 
-    return lazytensor(self)
+  def to_lazy(self): return LazyTensor(self)
 
   @property
   def shape(self): return self.data.shape
@@ -74,13 +73,16 @@ class tensor:
 
   # shape ops (changes shape and content)
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
-  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=axis))
+  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=[axis, keepdim]))
 
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
   def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
   def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
   def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
+  def transpose(self, *order): return tensor(ops.TRANSPOSE.forward(self, order), op = ops.TRANSPOSE(saved = [self,], ctx = order))
+
+  # do we need this
   def flip(self, axis): return tensor(ops.FLIP.forward(self, axis), op = ops.FLIP(saved = [self,], ctx = axis))
 
   # helpers
@@ -105,13 +107,41 @@ class tensor:
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
 
-  # CONV as a matmul: reshape -> matmul (sparse kernel) -> reshape
-  def conv2d(self, in_c, out_c, kernel_size):
-    kernel = tensor.randn(kernel_size, kernel_size) if isinstance(kernel_size, int) else tensor.randn(*kernel_size)
-    out_s = (kernel.shape[0]+self.shape[0]-1, kernel.shape[1]+self.shape[1]-1)
-    kernel = kernel.pad_to(out_s).tpltz(self.shape, kernel.shape)
-    out = kernel.dot(self.reshape(-1,1)).flip(1).reshape(*out_s)
+  # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
+  def conv2d(self, in_c, out_c, kernel_size, padding = 1):
+    f_h, f_w = self.shape[2], self.shape[3]
+    k_ = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+
+    out_h = (self.shape[3] + 2 * padding - k_[0] + 1)
+    out_w = (self.shape[2] + 2 * padding - k_[1] + 1)
+
+    kernel = tensor.ones(k_)
+    k, i, j = self.get_im2col_indices(*k_)
+    x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
+    cols = x_padded[:, k, i, j]
+    C = self.shape[0]
+    cols = cols.transpose(1,2,0).reshape(f_h * f_w * C, -1)
+    print(kernel.reshape(1,-1).shape, cols.shape)
+    out = (kernel.reshape(1,-1)).dot(cols).reshape(in_c, 1, out_w, out_h)
     return out
+
+  # input image im2col
+  def get_im2col_indices(self, f_h, f_w, padding=1, stride=1):
+    N, C, H, W = self.shape
+    out_height = int((H+2 * padding - f_h) / stride + 1)
+    out_width = int((W+2 * padding - f_w) / stride + 1)
+
+    # yoinked from CS231N
+    i0 = np.repeat(np.arange(f_h), f_w)
+    i0 = np.tile(i0, C)
+    i1 = stride * np.repeat(np.arange(out_height), out_width)
+    j0 = np.tile(np.arange(f_w), f_h * C)
+    j1 = stride * np.tile(np.arange(out_width), out_height)
+    i = i0.reshape(-1, 1) + i1.reshape(1, -1)
+    j = j0.reshape(-1, 1) + j1.reshape(1, -1)
+    k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
+
+    return (k, i, j)
 
   def pad_to(self, shape): 
     in_s, o_s, ss = self.shape, shape, 0
@@ -180,6 +210,8 @@ class tensor:
       x.op.backward(x.grad, x.data)
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
+  def _apply(self, fxn, x): return fxn.forward(self, x)
+
   def cast_op(self, fxn, x):
     x, y = self, x 
     y = y if isinstance(y, tensor) else tensor(y)
@@ -194,21 +226,28 @@ class tensor:
       ot = ot.cast(shp, ctx = shp)
     return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
-class lazytensor:
-  def __init__(self, tensor):
+# no idea what im doing here
+# here is the idea, wrap the tensor object, delay computation through gathering ops
+# realize the output buffer by executing all ops one after the other
+# should allow us to get the # buffers needed for LLVM backend without wasting compute
+class LazyTensor:
+  def __init__(self, tensor = None, cache = None):
     self.tensor = tensor
-    self.cache = []
-    self.shape = tensor.shape
+    self.cache = [] if cache is None else cache
+  
+  def lazy_op(self, fxn, x):
+    out = LazyTensor() 
+    out.cache.append([fxn, self, x])
+    return out
 
-  def lazy_oper(self, fxn, *args):
-    if fxn is ops.BinaryOPS:
-      self.cache.append([fxn, self.tensor, args.tensor])
-    if fxn == ops.UnaryOPS:
-      self.cache.append([fxn, self.tensor])
+  def register(self): 
+    for x in self.cache: 
+      out = x[1].tensor._apply(x[0], x[1].tensor)
+    return out
 
-  def __add__(self, x): 
-    return self.lazy_oper(ops.BinaryOPS.ADD, x) 
-
+  def add(self, x): 
+    return self.lazy_op(ops.ADD, x)
+  
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
     self.w = tensor.randn(in_shape, out_shape)
