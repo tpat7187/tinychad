@@ -143,6 +143,7 @@ class CAST(OP):
     self.saved[0].grad += r
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
+# need to rethink the way we do this
 class SLICE(OP):
   @staticmethod
   def forward(x, args): 
@@ -150,7 +151,10 @@ class SLICE(OP):
 
   def backward(self, out_grad, out):
     arg = self.ctx[0]
-    self.saved[0].grad[arg] += out_grad
+    # accumulate gradients
+    acc = np.zeros_like(self.saved[0].grad)
+    np.add.at(acc, arg, out_grad)
+    self.saved[0].grad = acc
 
 class PAD(OP): 
   @staticmethod 

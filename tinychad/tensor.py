@@ -252,6 +252,17 @@ class Linear:
   def __call__(self, x): 
     return x.dot(self.w) + self.b
 
+# how to support multiple filters, input/output channels
+class Conv2d: 
+  def __init__(self, in_channels, out_channels, kernel_size, padding=1, stride=1, bias = True):
+    self.padding, self.stride = padding, stride
+    kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+    self.w = tensor.randn(kernel_size)
+    self.b = tensor.randn(out_channels) if bias else None
+
+  def __call__(self, x): 
+    return x.conv2d(weight=self.w, bias=self.b, padding=padding, stride=stride)
+
 # returns cast, target, and buffer
 def castable(x, y): 
   assert is_castable(x.shape,y.shape), f"shapes {x.shape} and {y.shape} are not castable"
