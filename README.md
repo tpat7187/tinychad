@@ -13,10 +13,11 @@ TODO:
   * convolutions
     * write tests
     * convNet for MNIST? (need to write pooling + other non-linearity for image processing)
+    * Write efficientNet (HOT DOG, RED HOT)
+  * re-write DEBUG to show in/out shapes AND time it takes to execut the kernel
 
 things to read: 
   - https://llvmlite.readthedocs.io/en/latest/ "llvmlite documentation" 
-  - https://stackoverflow.com/questions/16798888/2-d-convolution-as-a-matrix-matrix-multiplication
 
 
 

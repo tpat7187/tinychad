@@ -5,7 +5,7 @@ from enum import Enum, auto
 class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto();
 class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); # matmul :( 
 class ShapeOPS(Enum): MAX = auto(); SUM = auto();
-class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); ROLL = auto(); FLIP = auto();
+class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); ROLL = auto(); TRANSPOSE = auto();
 
 class LOAD(OP): 
   def __init__(self, saved = None):
@@ -143,7 +143,6 @@ class CAST(OP):
     self.saved[0].grad += r
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
-# need to rethink the way we do this
 class SLICE(OP):
   @staticmethod
   def forward(x, args): 
@@ -151,10 +150,10 @@ class SLICE(OP):
 
   def backward(self, out_grad, out):
     arg = self.ctx[0]
-    # accumulate gradients
+    # accumulate gradients ; validate that this works for small slices?
     acc = np.zeros_like(self.saved[0].grad)
     np.add.at(acc, arg, out_grad)
-    self.saved[0].grad = acc
+    self.saved[0].grad += acc
 
 class PAD(OP): 
   @staticmethod 
@@ -177,15 +176,6 @@ class ROLL(OP):
   def backward(self, out_grad, out): 
     shift, axis = self.ctx
     self.saved[0].grad += np.roll(out_grad, -shift, axis)
-
-# do we need this
-class FLIP(OP): 
-  @staticmethod
-  def forward(x, axis):
-    return np.flip(x.data, axis=axis)
-
-  def backward(self, out_grad, out):
-    self.saved[0].grad += np.flip(out_grad, axis=-self.ctx)
 
 class TRANSPOSE(OP): 
   @staticmethod

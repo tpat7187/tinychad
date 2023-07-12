@@ -18,8 +18,8 @@ class tensor:
     self.data, self.op = np.array(data, dtype = np.float32), op
     self.grad, self.requires_grad = np.zeros(self.data.shape, dtype = np.float32), requires_grad
 
-  def ones(*shape): return tensor(np.ones(*shape))
-  def randn(*shape): return tensor(np.random.randn(*shape))
+  def ones(*shape, requires_grad = False): return tensor(np.ones(*shape), requires_grad)
+  def randn(*shape, requires_grad = False): return tensor(np.random.randn(*shape), requiers_grad)
   def eye(shape): return tensor(np.eye(shape))
   def zeros(*shape): return tensor(np.zeros(*shape))
 
@@ -82,9 +82,6 @@ class tensor:
   def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
   def transpose(self, *order): return tensor(ops.TRANSPOSE.forward(self, order), op = ops.TRANSPOSE(saved = [self,], ctx = order))
 
-  # do we need this
-  def flip(self, axis): return tensor(ops.FLIP.forward(self, axis), op = ops.FLIP(saved = [self,], ctx = axis))
-
   # helpers
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
@@ -109,26 +106,35 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight, bias= None, padding = 1, stride = 1):
+  def conv2d(self, weight, padding=1, stride=1):
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
-
     out_h, out_w = (H + 2 * padding - k_h + 1), (W + 2 * padding - k_w + 1)
-
     k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j]
     cols = cols.transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
-    out = (weight.reshape(Cout,-1)).dot(cols).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
+    out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
     return out
 
-  # input image im2col
+  # this doesnt work (it looks awfully similar to conv2d)
+  def max_pool2d(self, kernel, padding=1, stride=1):
+    N, Cin, H, W = self.shape
+    Cout, _, k_h, k_w = kernel.shape
+    out_h, out_w = (H + 2 * padding - k_h + 1), (W + 2 * padding - k_w + 1)
+    k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
+    x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
+    cols = x_padded[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    cols_max = np.argmax(cols.data, axis=0)
+    out = cols[cols_max, range(cols_max.size)]
+    out = out.reshape(out_h, out_w, N, Cout).transpose(2,3,0,1)
+    return out
+
+  # input image, kernel_h, kernel_w
   def get_im2col_indices(self, f_h, f_w, padding=1, stride=1):
     N, C, H, W = self.shape
     out_height = int((H+2 * padding - f_h) / stride + 1)
     out_width = int((W+2 * padding - f_w) / stride + 1)
-
-    # yoinked from CS231N
     i0 = np.repeat(np.arange(f_h), f_w)
     i0 = np.tile(i0, C)
     i1 = stride * np.repeat(np.arange(out_height), out_width)
@@ -137,7 +143,6 @@ class tensor:
     i = i0.reshape(-1, 1) + i1.reshape(1, -1)
     j = j0.reshape(-1, 1) + j1.reshape(1, -1)
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
-
     return (k, i, j)
 
   def pad_to(self, shape): 
@@ -159,6 +164,7 @@ class tensor:
       args[j] = args[j].pad(out_t).roll((j+1)*args[j].shape[axis], axis)
       out += args[j]
     return out
+
 
   # input padded kernel and input size, output doubly blocked circulant matrix
   def tpltz(self, input_size, kernel_size):
@@ -244,7 +250,9 @@ class LazyTensor:
 
   def add(self, x): 
     return self.lazy_op(ops.ADD, x)
-  
+
+
+# for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
     self.w = tensor.randn(in_shape, out_shape)
@@ -253,16 +261,15 @@ class Linear:
   def __call__(self, x): 
     return x.dot(self.w) + self.b
 
-# how to support multiple filters, input/output channels
 class Conv2d: 
   def __init__(self, in_channels, out_channels, kernel_size, padding=1, stride=1, bias = True):
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
-    self.w = tensor.randn(kernel_size)
-    self.b = tensor.randn(out_channels) if bias else None
+    self.w = tensor.randn(1, out_channels, *kernel_size)
+    self.b = tensor.randn(out_channels) if bias else None 
 
   def __call__(self, x): 
-    return x.conv2d(weight=self.w, bias=self.b, padding=padding, stride=stride)
+    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride)
 
 # returns cast, target, and buffer
 def castable(x, y): 
