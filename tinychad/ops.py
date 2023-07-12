@@ -178,6 +178,7 @@ class ROLL(OP):
     shift, axis = self.ctx
     self.saved[0].grad += np.roll(out_grad, -shift, axis)
 
+# do we need this
 class FLIP(OP): 
   @staticmethod
   def forward(x, axis):
@@ -191,17 +192,9 @@ class TRANSPOSE(OP):
   def forward(x, order): return np.transpose(x.data, order)
 
   def backward(self, out_grad, out): 
-    self.saved[0].grad += np.transpose(out_grad, (2,0,1))
+    self.saved[0].grad += np.transpose(out_grad, np.argsort(self.ctx))
 
 
   
-
-
-
-
-
-
-
-
 
 

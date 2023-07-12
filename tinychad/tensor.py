@@ -110,15 +110,16 @@ class tensor:
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
   def conv2d(self, weight, bias= None, padding = 1, stride = 1):
-    k_ = (weight.shape[2], weight.shape[3])
+    N, Cin, H, W = self.shape
+    Cout, _, k_h, k_w = weight.shape
 
-    out_h, out_w = (self.shape[3] + 2 * padding - k_[0] + 1), (self.shape[2] + 2 * padding - k_[1] + 1)
+    out_h, out_w = (H + 2 * padding - k_h + 1), (W + 2 * padding - k_w + 1)
 
-    k, i, j = self.get_im2col_indices(k_[0], k_[1], padding=padding, stride=stride)
+    k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j]
-    cols = cols.transpose(1,2,0).reshape(k_[0] * k_[1] * self.shape[1], -1)
-    out = (weight.reshape(1,-1)).dot(cols).reshape(1, 1, out_w, out_h)
+    cols = cols.transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    out = (weight.reshape(Cout,-1)).dot(cols).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
     return out
 
   # input image im2col

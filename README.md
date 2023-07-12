@@ -11,7 +11,8 @@ TODO:
   * look into LLVMlite (how can we recreate matmul and other binary ops in LLVM IR)
     * lazy evaluation-esque runtime for assigning buffers and shapes
   * convolutions
-    * our conv crashes for large images (128+)
+    * write tests
+    * convNet for MNIST? (need to write pooling + other non-linearity for image processing)
 
 things to read: 
   - https://llvmlite.readthedocs.io/en/latest/ "llvmlite documentation" 
