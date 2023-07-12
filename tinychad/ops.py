@@ -187,7 +187,8 @@ class TRANSPOSE(OP):
   def forward(x, order): return np.transpose(x.data, order)
 
   def backward(self, out_grad, out): 
-    pass
+    self.saved[0].grad += np.transpose(out_grad, (2,0,1))
+
 
   
 
