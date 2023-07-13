@@ -85,7 +85,7 @@ class NEG(OP):
 # shape ops
 class SUM(OP):
   @staticmethod
-  def forward(x, axis, keepdim):
+  def forward(x, axis=None, keepdim=None):
     return np.array([x.data.sum(keepdims = keepdim)]) if axis is None else x.data.sum(axis=axis, keepdims = keepdim)
 
   def backward(self, out_grad, out):

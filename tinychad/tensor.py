@@ -1,6 +1,9 @@
 import numpy as np 
 import os
 import time
+from typing import NewType, Type 
+
+DEBUG = os.getenv("DEBUG") 
 
 class OP: 
   def __init__(self, saved = None, ctx = None):
@@ -11,9 +14,17 @@ class OP:
   def forward(x, y): return f"forward not implemented for {self.arg}" 
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
-  @staticmethod
-  def apply(fxn, x, *args, **kwargs): 
-    return tensor(fxn.forward(x, *args), op = fxn(saved = [x, *args], ctx = kwargs))
+  # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
+  @classmethod
+  def apply(self, *x, **kwargs):
+    ctx = list(kwargs.values())
+    if DEBUG: st = time.monotonic()
+    out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = ctx))
+    if DEBUG: 
+      et= time.monotonic() - st
+      in_s = list(n.shape for n in out.op.saved)
+      print("op = {:7} in: {:<25} out: {:<15} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+    return out
 
 import tinychad.ops as ops
 
@@ -64,21 +75,17 @@ class tensor:
   def sub(self, x): return self.cast_op(ops.SUB, x) 
   def mul(self, x): return self.cast_op(ops.MUL, x) 
   def div(self, x): return self.cast_op(ops.DIV, x)
-
-  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
-
-  def dot(self, x): return OP.apply(ops.MATMUL, self, x)
-  def matmul(self, x): return self.dot(x)
+  def dot(self, x): return ops.MATMUL.apply(self, x)
 
   # unary ops
-  def relu(self): return OP.apply(ops.RELU, self)
-  def exp(self):  return OP.apply(ops.EXP, self)
-  def log(self):  return OP.apply(ops.LOG, self)
-  def neg(self):  return OP.apply(ops.NEG, self)
+  def relu(self): return ops.RELU.apply(self)
+  def exp(self):  return ops.EXP.apply(self)
+  def log(self):  return ops.LOG.apply(self)
+  def neg(self):  return ops.NEG.apply(self)
 
   # shape ops (changes shape and content)
-  def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
-  def sum(self, axis = None, keepdim = False): return tensor(ops.SUM.forward(self, axis, keepdim), op = ops.SUM(saved = [self,], ctx=[axis, keepdim]))
+  def max(self, axis=None, keepdim=False): return ops.MAX.apply(self, axis=axis, keepdim=keepdim)
+  def sum(self, axis=None, keepdim=False): return ops.SUM.apply(self, axis=axis, keepdim=keepdim)
 
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
   def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
@@ -87,9 +94,12 @@ class tensor:
   def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
   def transpose(self, *order): return tensor(ops.TRANSPOSE.forward(self, order), op = ops.TRANSPOSE(saved = [self,], ctx = order))
 
+  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
+
   # helpers
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
+  def matmul(self, x): return self.dot(x)
 
   def mean(self, axis=None, keepdim=False): 
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -170,7 +180,6 @@ class tensor:
       out += args[j]
     return out
 
-
   # input padded kernel and input size, output doubly blocked circulant matrix
   def tpltz(self, input_size, kernel_size):
     blocks, tpltz =  [], []
@@ -212,9 +221,6 @@ class tensor:
     for x in reversed(self.toposort()): 
       assert x.grad.shape == x.shape, \
         f"grad shape must match tensor shape in {x.grad.shape} != {x.shape} on {x.op.arg}"
-      if DEBUG:
-        in_s = list(n.shape for n in x.op.saved)
-        print(f"op = <{x.op.arg}> in: {in_s} -> out: {x.data.shape} with grad: {x.grad.shape}")
       x.op.backward(x.grad, x.data)
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
@@ -232,7 +238,8 @@ class tensor:
       cst = cst.cast(shp, ctx = shp)
     if axis == 0:
       ot = ot.cast(shp, ctx = shp)
-    return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
+    return fxn.apply(cst, ot)
+    #return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
 # no idea what im doing here
 # here is the idea, wrap the tensor object, delay computation through gathering ops
@@ -256,7 +263,6 @@ class LazyTensor:
   def add(self, x): 
     return self.lazy_op(ops.ADD, x)
 
-
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
@@ -271,10 +277,10 @@ class Conv2d:
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     self.w = tensor.randn(1, out_channels, *kernel_size)
-    self.b = tensor.randn(out_channels) if bias else None 
+    self.b = tensor.randn(1,1,1,out_channels) if bias else None # TODO: validate shape
 
-  def __call__(self, x): 
-    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride).add(self.b)
+  def __call__(self, x):
+    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride)
 
 # returns cast, target, and buffer
 def castable(x, y): 
