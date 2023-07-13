@@ -1,5 +1,6 @@
 import numpy as np 
 import os
+import time
 
 class OP: 
   def __init__(self, saved = None, ctx = None):
@@ -10,6 +11,10 @@ class OP:
   def forward(x, y): return f"forward not implemented for {self.arg}" 
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
+  @staticmethod
+  def apply(fxn, x, *args, **kwargs): 
+    return tensor(fxn.forward(x, *args), op = fxn(saved = [x, *args], ctx = kwargs))
+
 import tinychad.ops as ops
 
 #### TENSOR CLASS ####
@@ -18,10 +23,10 @@ class tensor:
     self.data, self.op = np.array(data, dtype = np.float32), op
     self.grad, self.requires_grad = np.zeros(self.data.shape, dtype = np.float32), requires_grad
 
-  def ones(*shape, requires_grad = False): return tensor(np.ones(*shape), requires_grad)
-  def randn(*shape, requires_grad = False): return tensor(np.random.randn(*shape), requiers_grad)
-  def eye(shape): return tensor(np.eye(shape))
-  def zeros(*shape): return tensor(np.zeros(*shape))
+  def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
+  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
+  def eye(shape, **kwargs): return tensor(np.eye(shape), **kwargs)
+  def zeros(*shape, **kwargs): return tensor(np.zeros(*shape), **kwargs)
 
   def to_lazy(self): return LazyTensor(self)
 
@@ -62,14 +67,14 @@ class tensor:
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
-  # MATMUL
-  def dot(self, x): return tensor(ops.MATMUL.forward(self, x), op = ops.MATMUL(saved = [self,x]))
+  def dot(self, x): return OP.apply(ops.MATMUL, self, x)
+  def matmul(self, x): return self.dot(x)
 
   # unary ops
-  def relu(self): return tensor(ops.RELU.forward(self), op = ops.RELU(saved = [self,]))
-  def exp(self): return tensor(ops.EXP.forward(self), op = ops.EXP(saved = [self,]))
-  def log(self): return tensor(ops.LOG.forward(self), op = ops.LOG(saved = [self,]))
-  def neg(self): return tensor(ops.NEG.forward(self), op = ops.NEG(saved = [self,]))
+  def relu(self): return OP.apply(ops.RELU, self)
+  def exp(self):  return OP.apply(ops.EXP, self)
+  def log(self):  return OP.apply(ops.LOG, self)
+  def neg(self):  return OP.apply(ops.NEG, self)
 
   # shape ops (changes shape and content)
   def max(self, axis = None, keepdim = False): return tensor(ops.MAX.forward(self, axis, keepdim), op = ops.MAX(saved = [self,], ctx=[axis, keepdim]))
@@ -259,7 +264,7 @@ class Linear:
     self.b = tensor.randn(out_shape) if bias else None
 
   def __call__(self, x): 
-    return x.dot(self.w) + self.b
+    return x.dot(self.w).add(self.b)
 
 class Conv2d: 
   def __init__(self, in_channels, out_channels, kernel_size, padding=1, stride=1, bias = True):
@@ -269,7 +274,7 @@ class Conv2d:
     self.b = tensor.randn(out_channels) if bias else None 
 
   def __call__(self, x): 
-    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride)
+    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride).add(self.b)
 
 # returns cast, target, and buffer
 def castable(x, y): 
