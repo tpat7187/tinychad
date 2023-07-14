@@ -17,9 +17,8 @@ class OP:
   # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
   @classmethod
   def apply(self, *x, **kwargs):
-    ctx = list(kwargs.values())
     if DEBUG: st = time.monotonic()
-    out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = ctx))
+    out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
@@ -121,35 +120,43 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight, padding=1, stride=1):
+  def conv2d(self, weight, bias=None, padding=1, stride=1):
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
-    out_h, out_w = (H + 2 * padding - k_h + 1), (W + 2 * padding - k_w + 1)
-    k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
-    x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
-    cols = x_padded[:, k, i, j]
-    cols = cols.transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
-    out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
-    return out
-
-  # this doesnt work (it looks awfully similar to conv2d)
-  def max_pool2d(self, kernel, padding=1, stride=1):
-    N, Cin, H, W = self.shape
-    Cout, _, k_h, k_w = kernel.shape
-    out_h, out_w = (H + 2 * padding - k_h + 1), (W + 2 * padding - k_w + 1)
+    out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
     k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
+    return out
+
+  def max_pool2d(self, kernel_size, stride=1):
+    kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+    N, Cin, H, W = self.shape
+    k_h, k_w = kernel_size
+    out_h, out_w = ((H - k_h)//stride + 1), ((W - k_w)//stride + 1)
+    k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
+    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     cols_max = np.argmax(cols.data, axis=0)
-    out = cols[cols_max, range(cols_max.size)]
-    out = out.reshape(out_h, out_w, N, Cout).transpose(2,3,0,1)
+    out = cols[cols_max, np.arange(cols.shape[1])]
+    out = out.reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
+    return out
+
+  def avg_pool2d(self, kernel_size, stride=1):
+    kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+    N, Cin, H, W = self.shape
+    k_h, k_w = kernel_size
+    out_h, out_w = ((H - k_h)//stride + 1), ((W - k_w)//stride + 1)
+    k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
+    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    out = cols.mean(axis=0).reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
     return out
 
   # input image, kernel_h, kernel_w
-  def get_im2col_indices(self, f_h, f_w, padding=1, stride=1):
+  def get_im2col_indices(self, f_h, f_w, padding=0, stride=1):
     N, C, H, W = self.shape
-    out_height = int((H+2 * padding - f_h) / stride + 1)
-    out_width = int((W+2 * padding - f_w) / stride + 1)
+    out_height = (H+2 * padding - f_h) //stride + 1
+    out_width = (W+2 * padding - f_w) //stride + 1
     i0 = np.repeat(np.arange(f_h), f_w)
     i0 = np.tile(i0, C)
     i1 = stride * np.repeat(np.arange(out_height), out_width)
@@ -276,11 +283,11 @@ class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size, padding=1, stride=1, bias = True):
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
-    self.w = tensor.randn(1, out_channels, *kernel_size)
-    self.b = tensor.randn(1,1,1,out_channels) if bias else None # TODO: validate shape
+    self.w = tensor.randn(out_channels, in_channels, *kernel_size)
+    self.b = tensor.randn(out_channels) if bias else None # TODO: validate shape
 
   def __call__(self, x):
-    return x.conv2d(weight=self.w, padding=self.padding, stride=self.stride)
+    return x.conv2d(weight=self.w, bias = self.b, padding=self.padding, stride=self.stride)
 
 # returns cast, target, and buffer
 def castable(x, y): 
