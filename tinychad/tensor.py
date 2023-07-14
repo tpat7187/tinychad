@@ -95,10 +95,10 @@ class tensor:
 
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
-  # helpers
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
   def matmul(self, x): return self.dot(x)
+  def sigmoid(self): return self.exp().div(self.exp()+1)
 
   def mean(self, axis=None, keepdim=False): 
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -134,7 +134,7 @@ class tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
-    out_h, out_w = ((H - k_h)//stride + 1), ((W - k_w)//stride + 1)
+    out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
     k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
     cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     cols_max = np.argmax(cols.data, axis=0)
@@ -146,17 +146,17 @@ class tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
-    out_h, out_w = ((H - k_h)//stride + 1), ((W - k_w)//stride + 1)
+    out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
     k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
-    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w, Cin, -1)
     out = cols.mean(axis=0).reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
     return out
 
   # input image, kernel_h, kernel_w
   def get_im2col_indices(self, f_h, f_w, padding=0, stride=1):
     N, C, H, W = self.shape
-    out_height = (H+2 * padding - f_h) //stride + 1
-    out_width = (W+2 * padding - f_w) //stride + 1
+    out_height = ((H+2 * padding - f_h) //stride) + 1
+    out_width = ((W+2 * padding - f_w) //stride) + 1
     i0 = np.repeat(np.arange(f_h), f_w)
     i0 = np.tile(i0, C)
     i1 = stride * np.repeat(np.arange(out_height), out_width)
