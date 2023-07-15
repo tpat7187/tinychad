@@ -127,7 +127,7 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight, bias=None, padding=1, stride=1):
+  def conv2d(self, weight, bias=None, padding=0, stride=1):
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
     out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
@@ -142,8 +142,9 @@ class tensor:
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
     out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
-    k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
-    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
+    self = self.reshape(N*Cin, 1, H, W)
+    k, i, j = self.get_im2col_indices(k_h, k_w, stride=stride)
+    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w, Cin, -1)
     cols_max = np.argmax(cols.data, axis=0)
     out = cols[cols_max, np.arange(cols.shape[1])]
     out = out.reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
@@ -154,7 +155,8 @@ class tensor:
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
     out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
-    k, i, j = self.get_im2col_indices(k_h, k_w, padding=0, stride=stride)
+    self = self.reshape(N*Cin, 1, H, W)
+    k, i, j = self.get_im2col_indices(k_h, k_w, stride=stride)
     cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w, Cin, -1)
     out = cols.mean(axis=0).reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
     return out

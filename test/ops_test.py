@@ -78,6 +78,31 @@ def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None):
       except Exception: 
         raise Exception(f"<bw pass failure> tinychad: {b.grad} \n pytorch{bt.grad}")
 
+def conv_pool_test_helper_fw(tinychadfxn, torchfxn, input_shape, kernel_size, padding=0, stride=1): 
+  np.random.seed(0)
+
+  N = np.random.randn(*input_shape).astype(np.float32)
+  K = np.random.randn(1,input_shape[1],*kernel_size).astype(np.float32)
+
+  a, b = tensor(N, requires_grad = True), tensor(K, requires_grad = True)
+  at, bt = torch.tensor(N, requires_grad = True), torch.tensor(K, requires_grad = True)
+
+  FXN = [tensor.conv2d, tensor.max_pool2d, tensor.avg_pool2d]
+
+  if tinychadfxn == tensor.conv2d:
+    x = tinychadfxn(a, weight=b, padding=padding, stride=stride)
+    xt = torchfxn(at, weight=bt, padding=padding, stride=stride)
+  if tinychadfxn == tensor.avg_pool2d:
+    x = tinychadfxn(a, kernel_size, stride=stride)
+    xt = torchfxn(at, kernel_size, stride=stride)
+  if tinychadfxn == tensor.max_pool2d:
+    x = tinychadfxn(a, kernel_size, stride=stride)
+    xt = torchfxn(at, kernel_size, stride=stride)
+
+  try: 
+    np.testing.assert_allclose(x.data, xt.detach().numpy(), atol=1e-6, rtol=1e-3)
+  except Exception: 
+    raise Exception(f"<fw pass failure> tinychad: {x.data} \n pytorch{xt}")
 
 
 class test_ops(unittest.TestCase): 
@@ -142,11 +167,27 @@ class test_ops(unittest.TestCase):
     test_helper_bw(None, torch.max, tensor.max, axis = 0)
     test_helper_bw(None, torch.max, tensor.max, axis = 1)
 
-  '''
-  TRY TO REMOVE NEED OF A CONTEXT
-  def test_cast_fw(self): return test_helper_fw((5,5,5), torch.broadcast_to, tensor.cast)
-  def test_cast_bw(self): return test_helper_bw((5,5,5), torch.broadcast_to, tensor.cast)
-  '''
+  def test_conv_fw(self): 
+    conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (1,1,26,26), (3,3), padding=0)
+    conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (1,3,26,26), (5,5), padding=0)
+    conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (3,3,26,26), (3,3), padding=0)
+    conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (3,3,26,26), (3,3), padding=2, stride=1)
+    conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (3,3,26,26), (3,3), padding=2, stride=2)
+
+  def test_avg_pool_fw(self): 
+    conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (1,1,26,26), (3,3))
+    conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (1,3,5,5), (3,3))
+    conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (3,3,26,26), (3,3), stride=1)
+    conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (3,2,26,26), (3,3), stride=2)
+    conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (5,1,26,26), (3,3), stride=3)
+
+  def test_max_pool_fw(self): 
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,1,26,26), (3,3))
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,3,5,5), (3,3))
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,3,26,26), (3,3), stride=1)
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,26,26), (3,3), stride=2)
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,26,26), (3,3), stride=3)
+
 
 if __name__ == "__main__": 
   unittest.main()

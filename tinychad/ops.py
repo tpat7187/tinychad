@@ -2,8 +2,8 @@ import numpy as np
 from tinychad.tensor import OP
 from enum import Enum, auto
 
-class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto();
-class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); # matmul :( 
+class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto(); SQRT = auto();
+class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); 
 class ShapeOPS(Enum): MAX = auto(); SUM = auto();
 class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); ROLL = auto(); TRANSPOSE = auto();
 
@@ -134,7 +134,6 @@ class CAST(OP):
   @staticmethod 
   def forward(x, y): return np.broadcast_to(x.data, y)
 
-  # doesn't work for tensors of shape ()
   def backward(self, out_grad, out): 
     shp, r, ss = self.ctx, out_grad, 0 
     diff = len(out_grad.shape) - len(self.saved[0].shape)
@@ -167,6 +166,7 @@ class PAD(OP):
     w = tuple([slice(i[0], j-i[1], None) for i, j in zip(self.ctx, out.shape)])
     self.saved[0].grad += out_grad[w]
 
+# can we get rid of ROLL
 class ROLL(OP): 
   @staticmethod
   def forward(x, shift, axis): 
@@ -183,7 +183,6 @@ class TRANSPOSE(OP):
   def backward(self, out_grad, out): 
     self.saved[0].grad += np.transpose(out_grad, np.argsort(self.ctx))
 
-
-  
+ 
 
 
