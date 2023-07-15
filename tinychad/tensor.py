@@ -78,6 +78,7 @@ class tensor:
 
   # unary ops
   def relu(self): return ops.RELU.apply(self)
+  def sqrt(self):  return ops.SQRT.apply(self)
   def exp(self):  return ops.EXP.apply(self)
   def log(self):  return ops.LOG.apply(self)
   def neg(self):  return ops.NEG.apply(self)
@@ -92,18 +93,24 @@ class tensor:
   def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
   def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
   def transpose(self, *order): return tensor(ops.TRANSPOSE.forward(self, order), op = ops.TRANSPOSE(saved = [self,], ctx = order))
-
   def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
 
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
   def matmul(self, x): return self.dot(x)
   def sigmoid(self): return self.exp().div(self.exp()+1)
+  def square(self): return self*self
 
   def mean(self, axis=None, keepdim=False): 
     out = self.sum(axis=axis, keepdim=keepdim)
     ss = out * (np.prod(out.shape) / np.prod(self.shape))
     return ss
+
+  def std(self, axis=None, keepdim=False): 
+    mn = self.mean(axis=axis, keepdim=keepdim)
+    ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
+    out = (ss / (np.prod(self.shape)/np.prod(ss.shape))).sqrt()
+    return out
 
   def _softmax(self, axis): 
     m = self - self.max(axis=axis, keepdim=True)
@@ -167,6 +174,11 @@ class tensor:
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
 
+
+  def batchnorm2d(self, num_features): 
+    assert len(self.shape) == 4
+    pass
+
   def pad_to(self, shape): 
     in_s, o_s, ss = self.shape, shape, 0
     p_w = [[0,0] for _ in range(len(self.shape))]
@@ -195,6 +207,7 @@ class tensor:
       rl = [] 
       for j in range(r.shape[0]-kernel_size[0]):
         rl.append(r.roll(j+1, axis=0))
+
       blocks.append(r.cat(*rl, axis=1))
     blocks = blocks[::-1]
     block = tensor.cat(*[_ for _ in blocks], axis=0)
@@ -212,7 +225,6 @@ class tensor:
     def _toposort(s): 
       if s not in vis: 
         vis.append(s)
-
         if not isinstance(s.op, ops.LOAD):
           for child in s.op.saved: 
             _toposort(child)
@@ -221,8 +233,6 @@ class tensor:
     return topo
 
   def backward(self):
-    DEBUG = os.getenv("DEBUG") 
-
     assert(self.grad.shape == (1,))
     self.grad = np.ones(self.grad.shape)
     for x in reversed(self.toposort()): 
@@ -235,18 +245,15 @@ class tensor:
 
   def cast_op(self, fxn, x):
     x, y = self, x 
-    y = y if isinstance(y, tensor) else tensor(y)
-    x = x if isinstance(x, tensor) else tensor(x)
+    y = y if isinstance(y, tensor) else tensor([y])
+    x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: 
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
     cst, shp, ot, axis = castable(x,y)
     # preserves casting order based on castable outputs
-    if axis == 1: 
-      cst = cst.cast(shp, ctx = shp)
-    if axis == 0:
-      ot = ot.cast(shp, ctx = shp)
+    if axis == 1: cst = cst.cast(shp, ctx = shp)
+    if axis == 0: ot = ot.cast(shp, ctx = shp)
     return fxn.apply(cst, ot)
-    #return tensor(fxn.forward(cst, ot), op = fxn(saved = [cst, ot]))
 
 # no idea what im doing here
 # here is the idea, wrap the tensor object, delay computation through gathering ops
@@ -293,10 +300,8 @@ class Conv2d:
 def castable(x, y): 
   assert is_castable(x.shape,y.shape), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)
-  if x.shape != out:
-    return x, out, y, 1
-  if y.shape != out:
-    return x, out, y, 0
+  if x.shape != out: return x, out, y, 1
+  if y.shape != out: return x, out, y, 0
 
 def is_castable(x, y): 
   for a, b in zip(x[::-1], y[::-1]): 

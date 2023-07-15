@@ -82,6 +82,13 @@ class NEG(OP):
   def backward(self, out_grad, out): 
     self.saved[0].grad += -1*out_grad
 
+class SQRT(OP): 
+  @staticmethod 
+  def forward(x): return np.sqrt(x.data)
+
+  def backward(self, out_grad, out): 
+    self.saved[0].grad += (1 / 2 * out_grad**2)
+
 # shape ops
 class SUM(OP):
   @staticmethod
@@ -123,23 +130,17 @@ class RESHAPE(OP):
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
 
-# TODO: once the shapes are equal, we need to find the axis to sum over to make them the same
 class CAST(OP):
   @staticmethod 
   def forward(x, y): return np.broadcast_to(x.data, y)
 
+  # doesn't work for tensors of shape ()
   def backward(self, out_grad, out): 
-    # can we do this better? do we need a ctx
-    shp, r = self.ctx, out_grad
-    for j in range(len(out_grad.shape) - len(self.saved[0].shape)):
-      r = r.sum(axis=0)
-    if len(r.shape) == len(self.saved[0].shape) and len(r.shape)>1 and len(self.saved[0].shape)>1:
-      ss = 0 
-      for i,j in zip(r.shape, self.saved[0].shape): 
-        if i != j: 
-          break
-        ss+=1
-      r = r.sum(axis=ss, keepdims = True)
+    shp, r, ss = self.ctx, out_grad, 0 
+    diff = len(out_grad.shape) - len(self.saved[0].shape)
+    if diff > 0: r = r.sum(*np.arange(diff))
+    t = tuple([i for i, (a, b) in enumerate(zip(r.shape, self.saved[0].shape)) if a != b])
+    r = r.sum(axis = t, keepdims = True)
     self.saved[0].grad += r
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
@@ -163,10 +164,8 @@ class PAD(OP):
     return out
 
   def backward(self, out_grad, out): 
-    w = [] 
-    for i,j in zip(self.ctx, out.shape):
-      w.append(slice(i[0], j-i[1], None))
-    self.saved[0].grad += out_grad[tuple(w)]
+    w = tuple([slice(i[0], j-i[1], None) for i, j in zip(self.ctx, out.shape)])
+    self.saved[0].grad += out_grad[w]
 
 class ROLL(OP): 
   @staticmethod
