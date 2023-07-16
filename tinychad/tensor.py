@@ -137,21 +137,22 @@ class tensor:
     out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
     return out
 
-  def max_pool2d(self, kernel_size, stride=1):
+  def max_pool2d(self, kernel_size, stride=None):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+    stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
-    out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
-    self = self.reshape(N*Cin, 1, H, W)
+    out_h, out_w = (H - k_h) //stride + 1, (W - k_w)//stride + 1
     k, i, j = self.get_im2col_indices(k_h, k_w, stride=stride)
-    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w, Cin, -1)
+    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     cols_max = np.argmax(cols.data, axis=0)
-    out = cols[cols_max, np.arange(cols.shape[1])]
-    out = out.reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
+    cols = cols[cols_max, np.arange(cols.shape[1])]
+    out = cols.reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
     return out
 
-  def avg_pool2d(self, kernel_size, stride=1):
+  def avg_pool2d(self, kernel_size, stride=None):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+    stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
     out_h, out_w = ((H - k_h)//stride) + 1, ((W - k_w)//stride) + 1
@@ -176,10 +177,13 @@ class tensor:
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
 
-
-  def batchnorm2d(self, num_features): 
+  def batchnorm2d(self, weight, bias = None): 
     assert len(self.shape) == 4
-    pass
+    mn = self.mean()
+    st = self.std()
+    out =((self - mn) / (st + 1e-10) ) * weight
+    return out
+
 
   def pad_to(self, shape): 
     in_s, o_s, ss = self.shape, shape, 0
@@ -209,7 +213,6 @@ class tensor:
       rl = [] 
       for j in range(r.shape[0]-kernel_size[0]):
         rl.append(r.roll(j+1, axis=0))
-
       blocks.append(r.cat(*rl, axis=1))
     blocks = blocks[::-1]
     block = tensor.cat(*[_ for _ in blocks], axis=0)

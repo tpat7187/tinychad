@@ -47,11 +47,11 @@ class DIV(OP):
 
 class MATMUL(OP): 
   @staticmethod
-  def forward(x, y): return np.dot(x.data, y.data)
+  def forward(x, y): return np.matmul(x.data, y.data)
 
   def backward(self, out_grad, out):
-    self.saved[0].grad += np.dot(out_grad, self.saved[1].T().data)
-    self.saved[1].grad += np.dot(self.saved[0].T().data, out_grad)
+    self.saved[0].grad += np.matmul(out_grad, self.saved[1].T().data)
+    self.saved[1].grad += np.matmul(self.saved[0].T().data, out_grad)
 
 # unary ops
 class RELU(OP):
@@ -92,7 +92,7 @@ class SQRT(OP):
 # shape ops
 class SUM(OP):
   @staticmethod
-  def forward(x, axis=None, keepdim=None):
+  def forward(x, axis, keepdim):
     return np.array([x.data.sum(keepdims = keepdim)]) if axis is None else x.data.sum(axis=axis, keepdims = keepdim)
 
   def backward(self, out_grad, out):
@@ -109,9 +109,9 @@ class MAX(OP):
     else:
       return x.data.max(axis=axis, keepdims = keepdim)
 
+  # TODO: refactor for axis = N
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
-    # broadcasting 'direction' changes depending on the axis we use
     if axis == 1:
       tt = np.broadcast_to(out.reshape(-1,1), self.saved[0].shape)
     else: 
@@ -166,7 +166,7 @@ class PAD(OP):
     w = tuple([slice(i[0], j-i[1], None) for i, j in zip(self.ctx, out.shape)])
     self.saved[0].grad += out_grad[w]
 
-# can we get rid of ROLL
+# can we get rid of this 
 class ROLL(OP): 
   @staticmethod
   def forward(x, shift, axis): 
