@@ -135,7 +135,9 @@ class tensor:
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
-    return out
+    if bias is not None: 
+      out = out + bias
+    return out 
 
   def max_pool2d(self, kernel_size, stride=None):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
@@ -306,10 +308,10 @@ class Conv2d:
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     self.w = tensor.randn(out_channels, in_channels, *kernel_size)
-    self.b = tensor.randn(out_channels) if bias else None # TODO: validate shape
+    self.b = tensor.randn(out_channels) if bias else None 
 
   def __call__(self, x):
-    return x.conv2d(weight=self.w, bias = self.b, padding=self.padding, stride=self.stride)
+    return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
 
 class BatchNorm2d:
   def __init__(self, num_features, affine=True):
