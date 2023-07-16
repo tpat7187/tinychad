@@ -137,7 +137,7 @@ class CAST(OP):
   def backward(self, out_grad, out): 
     shp, r, ss = self.ctx, out_grad, 0 
     diff = len(out_grad.shape) - len(self.saved[0].shape)
-    if diff > 0: r = r.sum(*np.arange(diff))
+    if diff > 0: r = r.sum(axis=tuple(np.arange(diff)))
     t = tuple([i for i, (a, b) in enumerate(zip(r.shape, self.saved[0].shape)) if a != b])
     r = r.sum(axis = t, keepdims = True)
     self.saved[0].grad += r

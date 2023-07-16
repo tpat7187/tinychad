@@ -106,10 +106,10 @@ class tensor:
     ss = out * (np.prod(out.shape) / np.prod(self.shape))
     return ss
 
-  def std(self, axis=None, keepdim=False): 
+  def var(self, axis=None, keepdim=False): 
     mn = self.mean(axis=axis, keepdim=keepdim)
     ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
-    out = (ss / (np.prod(self.shape)/np.prod(ss.shape))).sqrt()
+    out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
 
   def _softmax(self, axis): 
@@ -177,11 +177,12 @@ class tensor:
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
 
-  def batchnorm2d(self, weight, bias = None): 
+  def batchnorm2d(self, weight, bias = None, eps=1e-5):
     assert len(self.shape) == 4
-    mn = self.mean()
-    st = self.std()
-    out =((self - mn) / (st + 1e-10) ) * weight
+    mn = self.mean(axis=(0,2,3), keepdim=True)
+    vr = self.var(axis=(0,2,3), keepdim=True)
+    norm = (self - mn) / (vr + eps).sqrt()
+    out = weight * norm + bias if bias is not None else weight * norm
     return out
 
 
@@ -260,6 +261,15 @@ class tensor:
     if axis == 0: ot = ot.cast(shp, ctx = shp)
     return fxn.apply(cst, ot)
 
+  def cross_entropy_loss(self, real):
+    classes = self.shape[1]
+    r = real.flatten().astype(np.int32)
+    y = np.zeros((r.shape[0], classes), np.float32)
+    y[range(y.shape[0]), r] = -1.0*classes
+    y = y.reshape(list(real.shape) + [classes])
+    y = tensor(y)
+    return self.mul(y).mean()
+
 # no idea what im doing here
 # here is the idea, wrap the tensor object, delay computation through gathering ops
 # realize the output buffer by executing all ops one after the other
@@ -300,6 +310,18 @@ class Conv2d:
 
   def __call__(self, x):
     return x.conv2d(weight=self.w, bias = self.b, padding=self.padding, stride=self.stride)
+
+class BatchNorm2d:
+  def __init__(self, num_features, affine=True):
+    if affine == True:
+      self.w = tensor.ones((1,num_features,1,1))
+      self.b = tensor.ones((1,num_features,1,1))
+    else:
+      self.w, self.b = None, None
+
+  # TODO: add self.training property st we can track running mean/std
+  def __call__(self, x):
+    return x.batchnorm2d(weight=self.w, bias=self.b)
 
 # returns cast, target, and buffer
 def castable(x, y): 

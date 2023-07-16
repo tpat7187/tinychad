@@ -24,21 +24,18 @@ class bobnet():
     x = x.logsoftmax(axis=1)
     return x
 
-BS= 32
+BS= 128
 model = bobnet()
-optim = SGD([model.w1, model.w2, model.b1, model.b2], lr = 1e-3)
+optim = SGD([model.l1.w, model.l1.b, model.l2.w, model.l2.b], lr = 1e-3)
 
 def train(model, optim, xtrain, ytrain):
-  for jj in (t := trange(10000)):
+  for jj in (t := trange(2000)):
     ind = np.random.randint(0,59000, size=BS)
     inp = xtrain[ind][:].reshape(BS,-1).astype(np.float32)
     out = model.forward(tensor(inp))
     res = ytrain[ind]
-    OHE = np.zeros((res.size, 10)) 
-    OHE[np.arange(res.size), res] = 1
-    res = tensor(OHE)
 
-    loss = (-res.mul(out + 1e-10)).mean(axis=0).mean()
+    loss = out.cross_entropy_loss(res)
 
     cat = np.argmax(out.data, axis=1)
     acc = np.sum(cat == ytrain[ind])
