@@ -22,7 +22,7 @@ class OP:
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
-      print("op = {:7} in: {:<25} out: {:<15} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+      print("op = {:7} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
     return out
 
 import tinychad.ops as ops
@@ -37,6 +37,11 @@ class tensor:
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
   def eye(shape, **kwargs): return tensor(np.eye(shape), **kwargs)
   def zeros(*shape, **kwargs): return tensor(np.zeros(*shape), **kwargs)
+  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi))
+
+  def kaiming_uniform(*shape, a=0.01, **kwargs): 
+    b = np.sqrt(3.0) * np.sqrt(2.0 / (1 + a**2)) / np.sqrt(np.prod(shape[1:]))
+    return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
 
   def to_lazy(self): return LazyTensor(self)
 
@@ -187,7 +192,6 @@ class tensor:
     out = weight * norm + bias if bias is not None else weight * norm
     return out
 
-
   def pad_to(self, shape): 
     in_s, o_s, ss = self.shape, shape, 0
     p_w = [[0,0] for _ in range(len(self.shape))]
@@ -228,6 +232,8 @@ class tensor:
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
     return self.reshape(*dim)
 
+  def flatten(self): return self.reshape(-1,)
+ 
   def toposort(self): 
     topo, vis = [], []
     def _toposort(s): 
@@ -308,7 +314,8 @@ class Conv2d:
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     self.w = tensor.randn(out_channels, in_channels, *kernel_size)
-    self.b = tensor.randn(out_channels) if bias else None 
+    self.w = tensor.kaiming_uniform(out_channels, in_channels, *kernel_size, a = np.sqrt(5))
+    self.b = tensor.randn(1,out_channels,1,1) if bias else None 
 
   def __call__(self, x):
     return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
