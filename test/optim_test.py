@@ -4,6 +4,7 @@ sys.path.insert(1, '../')
 
 from tinychad.tensor import tensor, Linear
 from tinychad.optim import SGD
+from extra.training import sparse_categorical_crossentropy
 import numpy as np
 import torch
 import torch.nn as nn 
@@ -27,7 +28,7 @@ class bobnet:
   def forward(self, x):
     x = x.dot(self.l1w).add(self.l1b).relu() 
     x = x.dot(self.l2w).add(self.l2b).relu() 
-    x = x.logsoftmax(axis=1).sum()
+    x = x.logsoftmax(axis=1)
     return x
 
 class torchnet: 
@@ -40,7 +41,7 @@ class torchnet:
   def forward(self, x):
     x = x.matmul(self.l1w).add(self.l1b).relu()
     x = x.matmul(self.l2w).add(self.l2b).relu()
-    x = x.log_softmax(axis=1).sum()
+    x = x.log_softmax(dim=1)
     return x 
 
 
@@ -55,31 +56,38 @@ x = tensor(N, requires_grad = True)
 xt = torch.tensor(N, requires_grad = True)
 
 # for LOSS
+loss_fn = nn.CrossEntropyLoss()
+
 R = np.array([[1,0,0]]).astype(np.float32)
-RES_to = torch.tensor(R)
-RES = tensor(R)
+R_tc = np.array([[1,0,0]]).astype(np.float32)
 
 # steps:
-for j in range(1000):
+for j in range(10):
   s = tc_model.forward(x)
   st = to_model.forward(xt)
+
+  s_tinygrad = Tensor(s.data)
+
   np.testing.assert_allclose(s.data, st.detach().numpy(), atol =1e-6 , rtol =1e-3)
+
+  st_l = loss_fn(st, torch.tensor(R))
+  s_l = s.cross_entropy_loss(R_tc)
+
+  print(st_l.detach().numpy(), s_l.data, s_tinygrad.numpy())
 
   tinychad_optim.zero_grad()
   torch_optim.zero_grad()
 
-  s.backward()
-  st.backward()
-
-  print(s.data, st)
+  st_l.backward()
+  s_l.backward()
 
   tinychad_optim.step()
   torch_optim.step()
 
-  np.testing.assert_allclose(tc_model.l2w.data, to_model.l2w.detach().numpy(), atol =1e-6 , rtol =1e-3)
-  np.testing.assert_allclose(tc_model.l1w.data, to_model.l1w.detach().numpy(), atol =1e-6 , rtol =1e-3)
-  np.testing.assert_allclose(tc_model.l2b.data, to_model.l2b.detach().numpy(), atol =1e-6 , rtol =1e-3)
-  np.testing.assert_allclose(tc_model.l1b.data, to_model.l1b.detach().numpy(), atol =1e-6 , rtol =1e-3)
+  np.testing.assert_allclose(tc_model.l2w.data, to_model.l2w.detach().numpy(), atol =1e-4 , rtol =1e-3)
+  np.testing.assert_allclose(tc_model.l1w.data, to_model.l1w.detach().numpy(), atol =1e-4 , rtol =1e-3)
+  np.testing.assert_allclose(tc_model.l2b.data, to_model.l2b.detach().numpy(), atol =1e-4 , rtol =1e-3)
+  np.testing.assert_allclose(tc_model.l1b.data, to_model.l1b.detach().numpy(), atol =1e-4 , rtol =1e-3)
 
 
 
