@@ -282,7 +282,7 @@ class tensor:
 # realize the output buffer by executing all ops one after the other
 # should allow us to get the # buffers needed for LLVM backend without wasting compute
 class LazyTensor:
-  def __init__(self, tensor = None, _cache = [], op = ops.LOAD):
+  def __init__(self, tensor = None, _cache = tuple(), op = ops.LOAD):
     self.tensor = tensor
     self.cache = list(_cache) 
     self.op = op
@@ -317,7 +317,7 @@ class LazyTensor:
     return out
 
   def unary_op(self, fxn):
-    out = LazyTensor(_cache = (self), op = fxn)
+    out = LazyTensor(_cache = (self,), op = fxn)
     out.shape = self.shape
     return out
 
@@ -327,22 +327,39 @@ class LazyTensor:
   def reshape_op(self, shape, fxn):
     pass
 
-  def register(self): 
-    topo, vis = [], []
+  def toposort(self): 
+    topo, vis = [], set()
     def _toposort(s): 
       if s not in vis: 
-        vis.append(s)
+        vis.add(s)
         if s.op != ops.LOAD:
           for child in s.cache: 
             _toposort(child)
           topo.append(s)
     _toposort(self)
-    for j in topo:
+    return topo
+
+  def register(self): 
+    for j in self.toposort():
       j.tensor = j.op.apply(*[f.tensor for f in j.cache])
     return self.tensor
 
   def __repr__(self):
     return f"LazyTensor: op {self.op} cache: {self.cache} shape: {self.shape}"
+
+  def get_buffers(self): 
+    counter, cache = 0, set()
+    def _get_buffers(s):
+      nonlocal counter
+      if id(s) not in cache and s.op != ops.LOAD:
+        cache.add(id(s))
+        if s.op != ops.LOAD: 
+          for child in s.cache: 
+            _get_buffers(child)
+          if s.tensor is None: 
+            counter += 1
+    _get_buffers(self)
+    return counter, cache
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
