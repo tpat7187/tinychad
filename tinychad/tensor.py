@@ -4,6 +4,7 @@ import time
 from typing import NewType, Type 
 
 DEBUG = os.getenv("DEBUG") 
+LAZY = os.getenv("LAZY")
 
 class OP: 
   def __init__(self, saved = None, ctx = None):
@@ -32,6 +33,9 @@ class tensor:
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
     self.data, self.op = np.array(data, dtype = np.float32), op
     self.grad, self.requires_grad = np.zeros(self.data.shape, dtype = np.float32), requires_grad
+
+    if LAZY: 
+      self.to_lazy()
 
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
@@ -144,6 +148,7 @@ class tensor:
       out = out + bias
     return out 
 
+  # TODO: this still doesnt work for N > 1
   def max_pool2d(self, kernel_size, stride=None):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
@@ -282,11 +287,11 @@ class tensor:
 # realize the output buffer by executing all ops one after the other
 # should allow us to get the # buffers needed for LLVM backend without wasting compute
 class LazyTensor:
-  def __init__(self, tensor = None, _cache = tuple(), op = ops.LOAD):
+  def __init__(self, tensor = None, _cache = tuple(), op = ops.LOAD, ctx = None):
     self.tensor = tensor
     self.cache = list(_cache) 
     self.op = op
-    self.ctx = None
+    self.ctx = ctx
 
     if self.tensor is not None: 
       self.shape = tensor.shape
@@ -301,6 +306,9 @@ class LazyTensor:
   def exp(self) : return self.unary_op(ops.EXP)
   def log(self) : return self.unary_op(ops.LOG)
   def neg(self) : return self.unary_op(ops.NEG)
+
+  def sum(self, axis=None, keepdim=False): return self.shape_op(ops.SUM, axis, keepdim)
+  def max(self, axis=None, keepdim=False): return self.shape_op(ops.MAX, axis, keepdim)
 
   def __add__(self, x): return self.add(x)
   def __sub__(self, x): return self.sub(x)
@@ -321,13 +329,26 @@ class LazyTensor:
     out.shape = self.shape
     return out
 
-  def shape_op(self, fxn, axis=None, keepdims=None):
-    pass
+  def shape_op(self, fxn, axis, keepdim):
+    if axis is None: new_shape = (1,)
+    else:
+      nx = list(axis) if isinstance(axis, tuple) else [axis]
+      l = list(self.shape)
+      for j in nx: l[j] = 0 
+      new_shape = [i for i in l if i!=0] if keepdim == False else [1 if i == 0 else i for i in l]
+    out = LazyTensor(_cache = (self,), op = fxn, ctx = [axis, keepdim])
+    out.shape = tuple(new_shape)
+    return out
 
   def reshape_op(self, shape, fxn):
     pass
 
-  def toposort(self): 
+  def exec(self): 
+    # we need to get around this with op enums or ill go insane
+    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    ShapeOPS = [ops.SUM, ops.MAX]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
+
     topo, vis = [], set()
     def _toposort(s): 
       if s not in vis: 
@@ -337,11 +358,14 @@ class LazyTensor:
             _toposort(child)
           topo.append(s)
     _toposort(self)
-    return topo
-
-  def register(self): 
-    for j in self.toposort():
-      j.tensor = j.op.apply(*[f.tensor for f in j.cache])
+    for j in topo:
+      if j.op in BinaryOPS:
+        j.tensor = j.op.apply(*[f.tensor for f in j.cache])
+      if j.op in UnaryOPS:
+        j.tensor = j.op.apply(*[f.tensor for f in j.cache])
+      if j.op in ShapeOPS:
+        axis, keepdim = j.ctx[0], j.ctx[1]
+        j.tensor = j.op.apply(*[f.tensor for f in j.cache], axis=axis, keepdim=keepdim)
     return self.tensor
 
   def __repr__(self):
@@ -352,12 +376,10 @@ class LazyTensor:
     def _get_buffers(s):
       nonlocal counter
       if id(s) not in cache and s.op != ops.LOAD:
-        cache.add(id(s))
-        if s.op != ops.LOAD: 
-          for child in s.cache: 
-            _get_buffers(child)
-          if s.tensor is None: 
-            counter += 1
+        cache.add((hex(id(s)), s.shape))
+        [_get_buffers(child) for child in s.cache if s.op != ops.LOAD]
+        if s.tensor is None: 
+          counter += 1
     _get_buffers(self)
     return counter, cache
 

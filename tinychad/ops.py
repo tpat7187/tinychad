@@ -1,5 +1,6 @@
 import numpy as np
 from tinychad.tensor import OP
+from typing import Union
 from enum import Enum, auto
 
 class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto(); SQRT = auto();
