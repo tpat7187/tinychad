@@ -270,7 +270,7 @@ class tensor:
     return fxn.apply(cst, ot)
 
   def cross_entropy_loss(self, real):
-    classes = self.shape[1]
+    classes = self.shape[-1]
     r = real.flatten().astype(np.int32)
     y = np.zeros((r.shape[0], classes), np.float32)
     y[range(y.shape[0]), r] = -1.0*classes
@@ -278,27 +278,71 @@ class tensor:
     y = tensor(y)
     return self.mul(y).mean()
 
-# no idea what im doing here
 # here is the idea, wrap the tensor object, delay computation through gathering ops
 # realize the output buffer by executing all ops one after the other
 # should allow us to get the # buffers needed for LLVM backend without wasting compute
 class LazyTensor:
-  def __init__(self, tensor = None, cache = None):
+  def __init__(self, tensor = None, _cache = [], op = ops.LOAD):
     self.tensor = tensor
-    self.cache = [] if cache is None else cache
-  
-  def lazy_op(self, fxn, x):
-    out = LazyTensor() 
-    out.cache.append([fxn, self, x])
+    self.cache = list(_cache) 
+    self.op = op
+    self.ctx = None
+
+    if self.tensor is not None: 
+      self.shape = tensor.shape
+
+  def add(self,x): return self.binary_op(x, ops.ADD)
+  def sub(self,x): return self.binary_op(x, ops.SUB)
+  def mul(self,x): return self.binary_op(x, ops.MUL)
+  def div(self,x): return self.binary_op(x, ops.DIV)
+  def dot(self,x): return self.binary_op(x, ops.MATMUL)
+
+  def relu(self): return self.unary_op(ops.RELU)
+  def exp(self) : return self.unary_op(ops.EXP)
+  def log(self) : return self.unary_op(ops.LOG)
+  def neg(self) : return self.unary_op(ops.NEG)
+
+  def __add__(self, x): return self.add(x)
+  def __sub__(self, x): return self.sub(x)
+  def __mul__(self, x): return self.mul(x)
+  def __div__(self, x): return self.div(x)
+  def __matmul__(self, x): return self.dot(x)
+
+  def binary_op(self, y, fxn):
+    assert self.shape[1] == y.shape[0] if fxn == ops.MATMUL else self.shape == y.shape
+    if not isinstance(y, tensor): y = tensor([y])
+    if not isinstance(y, LazyTensor): y = y.to_lazy()
+    out = LazyTensor(_cache = (self, y), op = fxn)
+    out.shape = (self.shape[1], y.shape[0]) if fxn == ops.MATMUL else self.shape
     return out
+
+  def unary_op(self, fxn):
+    out = LazyTensor(_cache = (self), op = fxn)
+    out.shape = self.shape
+    return out
+
+  def shape_op(self, fxn, axis=None, keepdims=None):
+    pass
+
+  def reshape_op(self, shape, fxn):
+    pass
 
   def register(self): 
-    for x in self.cache: 
-      out = x[1].tensor._apply(x[0], x[1].tensor)
-    return out
+    topo, vis = [], []
+    def _toposort(s): 
+      if s not in vis: 
+        vis.append(s)
+        if s.op != ops.LOAD:
+          for child in s.cache: 
+            _toposort(child)
+          topo.append(s)
+    _toposort(self)
+    for j in topo:
+      j.tensor = j.op.apply(*[f.tensor for f in j.cache])
+    return self.tensor
 
-  def add(self, x): 
-    return self.lazy_op(ops.ADD, x)
+  def __repr__(self):
+    return f"LazyTensor: op {self.op} cache: {self.cache} shape: {self.shape}"
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 

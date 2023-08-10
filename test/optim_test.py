@@ -154,7 +154,6 @@ def test_conv():
   np.testing.assert_allclose(chad_model.c2.data, torch_model.c2.detach().numpy(), atol =1e-4 , rtol =1e-3)
   np.testing.assert_allclose(chad_model.l1.data, torch_model.l1.detach().numpy(), atol =1e-4 , rtol =1e-3)
 
-
 if __name__ == "__main__": 
   test_conv()
 
