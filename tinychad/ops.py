@@ -6,7 +6,7 @@ from enum import Enum, auto
 class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto(); SQRT = auto();
 class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); 
 class ShapeOPS(Enum): MAX = auto(); SUM = auto();
-class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); ROLL = auto(); TRANSPOSE = auto();
+class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); TRANSPOSE = auto();
 
 class LOAD(OP): 
   def __init__(self, saved = None):
@@ -126,7 +126,7 @@ class MAX(OP):
 # reshape ops
 class RESHAPE(OP): 
   @staticmethod 
-  def forward(x, *shape):  return np.reshape(x.data, shape)
+  def forward(x, *shape): return np.reshape(x.data, shape)
 
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
@@ -136,12 +136,11 @@ class CAST(OP):
   def forward(x, y): return np.broadcast_to(x.data, y)
 
   def backward(self, out_grad, out): 
-    shp, r, ss = self.ctx, out_grad, 0 
     diff = len(out_grad.shape) - len(self.saved[0].shape)
-    if diff > 0: r = r.sum(axis=tuple(np.arange(diff)))
-    t = tuple([i for i, (a, b) in enumerate(zip(r.shape, self.saved[0].shape)) if a != b])
-    r = r.sum(axis = t, keepdims = True)
-    self.saved[0].grad += r
+    if diff > 0: out_grad = out_grad.sum(axis=tuple(np.arange(diff)))
+    t = tuple([i for i, (a, b) in enumerate(zip(out_grad.shape, self.saved[0].shape)) if a != b])
+    out_grad = out_grad.sum(axis = t, keepdims = True)
+    self.saved[0].grad += out_grad
 
 # we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
 class SLICE(OP):
@@ -153,9 +152,10 @@ class SLICE(OP):
     arg = self.ctx[0]
     # accumulate gradients ; validate that this works for small slices?
     acc = np.zeros_like(self.saved[0].grad)
-    np.add.at(acc, arg, out_grad)
+    np.add.at(acc, *arg, out_grad)
     self.saved[0].grad += acc
 
+# the ctx in the backward pass is passed in with *args, because of the new generic reshape_op
 class PAD(OP): 
   @staticmethod 
   def forward(x, args):
@@ -164,25 +164,15 @@ class PAD(OP):
     return out
 
   def backward(self, out_grad, out): 
-    w = tuple([slice(i[0], j-i[1], None) for i, j in zip(self.ctx, out.shape)])
+    w = tuple([slice(i[0], j-i[1], None) for i, j in zip(*self.ctx, out.shape)])
     self.saved[0].grad += out_grad[w]
-
-# can we get rid of this 
-class ROLL(OP): 
-  @staticmethod
-  def forward(x, shift, axis): 
-    return np.roll(x.data, shift, axis)
-
-  def backward(self, out_grad, out): 
-    shift, axis = self.ctx
-    self.saved[0].grad += np.roll(out_grad, -shift, axis)
 
 class TRANSPOSE(OP): 
   @staticmethod
   def forward(x, order): return np.transpose(x.data, order)
 
   def backward(self, out_grad, out): 
-    self.saved[0].grad += np.transpose(out_grad, np.argsort(self.ctx))
+    self.saved[0].grad += np.transpose(out_grad, np.argsort(*self.ctx))
 
  
 

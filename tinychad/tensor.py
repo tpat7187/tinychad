@@ -23,7 +23,7 @@ class OP:
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
-      print("op = {:7} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
     return out
 
 import tinychad.ops as ops
@@ -97,18 +97,28 @@ class tensor:
   def sum(self, axis=None, keepdim=False): return ops.SUM.apply(self, axis=axis, keepdim=keepdim)
 
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
-  def reshape(self, *shape) : return tensor(ops.RESHAPE.forward(self, *shape), op = ops.RESHAPE(saved = [self,]))
-  def slice(self, *args) : return tensor(ops.SLICE.forward(self, *args), op = ops.SLICE(saved = [self,], ctx = args))
-  def pad(self, args): return tensor(ops.PAD.forward(self, args), op = ops.PAD(saved = [self,], ctx = args))
-  def roll(self, shift, axis): return tensor(ops.ROLL.forward(self, shift, axis), op = ops.ROLL(saved = [self,], ctx = [shift, axis]))
-  def transpose(self, *order): return tensor(ops.TRANSPOSE.forward(self, order), op = ops.TRANSPOSE(saved = [self,], ctx = order))
-  def cast(self, x, ctx): return tensor(ops.CAST.forward(self, x), op = ops.CAST(saved = [self,], ctx = ctx))
+  def reshape(self, *shape) : return self.reshape_op(ops.RESHAPE, shape = shape)
+  def slice(self, *args) : return self.reshape_op(ops.SLICE, args = args)
+  def pad(self, args) : return self.reshape_op(ops.PAD, args = args)
+  def transpose(self, *order) : return self.reshape_op(ops.TRANSPOSE, order = order)
+  def cast(self, shape) : return self.reshape_op(ops.CAST, shape = shape)
 
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
   def matmul(self, x): return self.dot(x)
   def sigmoid(self): return self.exp().div(self.exp()+1)
   def square(self): return self*self
+
+  # integrate this into apply, the only difference should be how we set the kwargs
+  def reshape_op(self, fxn, *args, **kwargs): 
+    l = list(*kwargs.values()) if fxn in (ops.RESHAPE, ops.SLICE) else list(kwargs.values())
+    if DEBUG: st = time.monotonic()
+    out = tensor(fxn.forward(self, *l), op = fxn(saved = [self,], ctx = list(kwargs.values())))
+    if DEBUG: 
+      et= time.monotonic() - st
+      in_s = list(n.shape for n in out.op.saved)
+      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+    return out
 
   def mean(self, axis=None, keepdim=False): 
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -205,6 +215,7 @@ class tensor:
       ss+=1 # cringe code please fix
     return self.pad(p_w)
 
+  # TODO: fix this with transpose instead of roll
   def cat(self, *args, axis=0):  
     assert all(len(x.shape) == len(self.shape) for x in args)
     out_shape, args = list(self.shape), list(args)
@@ -270,8 +281,8 @@ class tensor:
       return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
     cst, shp, ot, axis = castable(x,y)
     # preserves casting order based on castable outputs
-    if axis == 1: cst = cst.cast(shp, ctx = shp)
-    if axis == 0: ot = ot.cast(shp, ctx = shp)
+    if axis == 1: cst = cst.cast(shp)
+    if axis == 0: ot = ot.cast(shp)
     return fxn.apply(cst, ot)
 
   def cross_entropy_loss(self, real):
@@ -361,11 +372,13 @@ class LazyTensor:
     for j in topo:
       if j.op in BinaryOPS:
         j.tensor = j.op.apply(*[f.tensor for f in j.cache])
-      if j.op in UnaryOPS:
+      elif j.op in UnaryOPS:
         j.tensor = j.op.apply(*[f.tensor for f in j.cache])
-      if j.op in ShapeOPS:
+      elif j.op in ShapeOPS:
         axis, keepdim = j.ctx[0], j.ctx[1]
         j.tensor = j.op.apply(*[f.tensor for f in j.cache], axis=axis, keepdim=keepdim)
+      else:
+        raise NotImplementedError
     return self.tensor
 
   def __repr__(self):
