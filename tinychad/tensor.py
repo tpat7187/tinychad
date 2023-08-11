@@ -47,8 +47,8 @@ class View:
     args = list(args)
 
     if op in BinaryOPS:
-      #assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
-      out_s = (args[0].shape[1], args[1].shape[0]) if op == ops.MATMUL else args[0].shape 
+      assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
+      out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
       return out_s
     elif op in UnaryOPS: 
       out_s = args[0].shape
@@ -347,16 +347,14 @@ class tensor:
     return self.mul(y).mean()
 
   def get_buffers(self): 
-    counter, cache = 0, set()
+    assert LAZY, "cannot get buffers without lazy evaluation enabled"
+    cache = set()
     def _get_buffers(s):
-      nonlocal counter
-      if id(s) not in cache and s.op != ops.LOAD:
+      if id(s) not in cache and type(s.op) != ops.LOAD:
         cache.add((hex(id(s)), s.shape))
-        [_get_buffers(child) for child in s.cache if s.op != ops.LOAD]
-        if s.tensor is None: 
-          counter += 1
+        [_get_buffers(child) for child in s._cache if type(s.op) != ops.LOAD]
     _get_buffers(self)
-    return counter, cache
+    return cache
 
   def exec(self):
     assert LAZY
@@ -364,8 +362,6 @@ class tensor:
     ShapeOPS = [ops.SUM, ops.MAX]
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-    # this isnt a good idea if we run loops, the tensors become UNLAZY
 
     for j in self.toposort():
       if type(j.op) in BinaryOPS:
@@ -376,6 +372,7 @@ class tensor:
         axis, keepdim = j.op.ctx[0], j.op.ctx[1]
         j = j.op.apply(*[j for j in j._cache], axis=axis, keepdim=keepdim, lazy = True)
     self.data = j.data
+    return self
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
