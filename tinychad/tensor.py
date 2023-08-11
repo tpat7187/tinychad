@@ -17,10 +17,12 @@ class OP:
 
   # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
   @classmethod
-  def apply(self, *x, **kwargs):
-    if LAZY:
-      out = tensor(None, op = self(saved = [*x], ctx = list(kwargs.values())))
-      out.buffer_size = ViewTracker.generate_view(self, *x, **kwargs)
+  def apply(self, *x, lazy = False, **kwargs):
+    if LAZY and lazy == False:
+      lazyshape = View.generate_view(self, *x, **kwargs)
+      # TODO: find a way to do this without allocating memory, we're delaying computation but keeping memoryalloca
+      out = tensor(np.empty(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
+      out._cache, out._lazyshape = x, lazyshape
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -33,7 +35,7 @@ class OP:
 
 import tinychad.ops as ops
 
-class ViewTracker: 
+class View: 
   @classmethod
   def generate_view(self, op, *args, **kwargs):
     # we should use enums before i go insane
@@ -42,26 +44,41 @@ class ViewTracker:
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
-    args, kwargs = list(args), list(kwargs)
+    args = list(args)
 
     if op in BinaryOPS:
-      assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
+      #assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
       out_s = (args[0].shape[1], args[1].shape[0]) if op == ops.MATMUL else args[0].shape 
       return out_s
     elif op in UnaryOPS: 
       out_s = args[0].shape
       return out_s
     elif op in ShapeOPS:
-      axis, keepdim = kwargs[0], kwargs[1]
+      axis, keepdim = kwargs['axis'], kwargs['keepdim']
       if axis is None: out_s = (1,)
       else:
         nx = list(axis) if isinstance(axis, tuple) else [axis]
-        l = list(self.shape)
-        for j in nx: l[j] = 0 
-        out_s = [i for i in l if i!=0] if keepdim == False else [1 if i == 0 else i for i in l]
+        l = list(args[0].shape)
+        for j in nx: l[j] =0 
+        out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
       return out_s
     elif op in ReshapeOPS: 
       return None
+    
+  def _reshape(self, args): 
+    pass
+
+  def _slice(self, args): 
+    pass
+
+  def _transpose(self, args):
+    pass
+
+  def _pad(self, args):
+    pass
+    
+  def _cast(self, args):
+    pass
 
 
 #### TENSOR CLASS ####
@@ -70,9 +87,8 @@ class tensor:
     self.data = np.array(data, dtype=np.float32)
     self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
 
-    if LAZY:
-      self.lazy, self.cache = True, []
-      self.buffer_size = self.data.shape if self.data is not None else None
+    if LAZY: 
+      self._cache, self._lazyshape = [], self.data.shape if type(op) == ops.LOAD else ()
 
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
@@ -87,7 +103,7 @@ class tensor:
   def to_lazy(self): return LazyTensor(self)
 
   @property
-  def shape(self): return self.data.shape if not LAZY else self.buffer_size
+  def shape(self): return self.data.shape if not LAZY else self._lazyshape
 
   @property
   def dtype(self): return self.data.dtype
@@ -96,7 +112,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"op = <{self.op.arg}>: shape = {self.shape}"
+    return f"op = <{self.op.arg}>: shape = {self.shape}"#: lazycache = {self._cache}"
 
   def __getitem__(self, args): return self.slice(args)
 
@@ -330,94 +346,6 @@ class tensor:
     y = tensor(y)
     return self.mul(y).mean()
 
-# THIS SHOULD BE INCORPORATED INTO BASE TENSOR, WE WRAP TENSOR IN MLIRBUFFER
-class LazyTensor:
-  def __init__(self, tensor = None, _cache = tuple(), op = ops.LOAD, ctx = None):
-    self.tensor = tensor
-    self.cache = list(_cache) 
-    self.op = op
-    self.ctx = ctx
-
-    if self.tensor is not None: 
-      self.shape = tensor.shape
-
-  def add(self,x): return self.binary_op(x, ops.ADD)
-  def sub(self,x): return self.binary_op(x, ops.SUB)
-  def mul(self,x): return self.binary_op(x, ops.MUL)
-  def div(self,x): return self.binary_op(x, ops.DIV)
-  def dot(self,x): return self.binary_op(x, ops.MATMUL)
-
-  def relu(self): return self.unary_op(ops.RELU)
-  def exp(self) : return self.unary_op(ops.EXP)
-  def log(self) : return self.unary_op(ops.LOG)
-  def neg(self) : return self.unary_op(ops.NEG)
-
-  def sum(self, axis=None, keepdim=False): return self.shape_op(ops.SUM, axis, keepdim)
-  def max(self, axis=None, keepdim=False): return self.shape_op(ops.MAX, axis, keepdim)
-
-  def __add__(self, x): return self.add(x)
-  def __sub__(self, x): return self.sub(x)
-  def __mul__(self, x): return self.mul(x)
-  def __div__(self, x): return self.div(x)
-  def __matmul__(self, x): return self.dot(x)
-
-  def binary_op(self, y, fxn):
-    assert self.shape[1] == y.shape[0] if fxn == ops.MATMUL else self.shape == y.shape
-    if not isinstance(y, tensor): y = tensor([y])
-    if not isinstance(y, LazyTensor): y = y.to_lazy()
-    out = LazyTensor(_cache = (self, y), op = fxn)
-    out.shape = (self.shape[1], y.shape[0]) if fxn == ops.MATMUL else self.shape
-    return out
-
-  def unary_op(self, fxn):
-    out = LazyTensor(_cache = (self,), op = fxn)
-    out.shape = self.shape
-    return out
-
-  def shape_op(self, fxn, axis, keepdim):
-    if axis is None: new_shape = (1,)
-    else:
-      nx = list(axis) if isinstance(axis, tuple) else [axis]
-      l = list(self.shape)
-      for j in nx: l[j] = 0 
-      new_shape = [i for i in l if i!=0] if keepdim == False else [1 if i == 0 else i for i in l]
-    out = LazyTensor(_cache = (self,), op = fxn, ctx = [axis, keepdim])
-    out.shape = tuple(new_shape)
-    return out
-
-  def reshape_op(self, shape, fxn):
-    pass
-
-  def exec(self): 
-    # we need to get around this with op enums or ill go insane
-    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
-    ShapeOPS = [ops.SUM, ops.MAX]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
-    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-    topo, vis = [], set()
-    def _toposort(s): 
-      if s not in vis: vis.add(s)
-      if s.op != ops.LOAD:
-        for child in s.cache: 
-          _toposort(child)
-        topo.append(s)
-    _toposort(self)
-    for j in topo:
-      if j.op in BinaryOPS:
-        j.tensor = j.op.apply(*[f.tensor for f in j.cache])
-      elif j.op in UnaryOPS:
-        j.tensor = j.op.apply(*[f.tensor for f in j.cache])
-      elif j.op in ShapeOPS:
-        axis, keepdim = j.ctx[0], j.ctx[1]
-        j.tensor = j.op.apply(*[f.tensor for f in j.cache], axis=axis, keepdim=keepdim)
-      elif j.op in ReshapeOPS: 
-        pass
-    return self.tensor
-
-  def __repr__(self):
-    return f"LazyTensor: op {self.op} cache: {self.cache} shape: {self.shape}"
-
   def get_buffers(self): 
     counter, cache = 0, set()
     def _get_buffers(s):
@@ -429,6 +357,25 @@ class LazyTensor:
           counter += 1
     _get_buffers(self)
     return counter, cache
+
+  def exec(self):
+    assert LAZY
+    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    ShapeOPS = [ops.SUM, ops.MAX]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
+    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
+
+    # this isnt a good idea if we run loops, the tensors become UNLAZY
+
+    for j in self.toposort():
+      if type(j.op) in BinaryOPS:
+        j = j.op.apply(*[j for j in j._cache], lazy = True)
+      if type(j.op) in UnaryOPS:
+        j = j.op.apply(*[j for j in j._cache], lazy = True)
+      if type(j.op) in ShapeOPS:
+        axis, keepdim = j.op.ctx[0], j.op.ctx[1]
+        j = j.op.apply(*[j for j in j._cache], axis=axis, keepdim=keepdim, lazy = True)
+    self.data = j.data
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
