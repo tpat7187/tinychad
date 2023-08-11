@@ -18,6 +18,10 @@ class OP:
   # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
   @classmethod
   def apply(self, *x, **kwargs):
+    if LAZY:
+      out = tensor(None, op = self(saved = [*x], ctx = list(kwargs.values())))
+      out.buffer_size = ViewTracker.generate_view(self, *x, **kwargs)
+      return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
     if DEBUG: 
@@ -26,16 +30,49 @@ class OP:
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
     return out
 
+
 import tinychad.ops as ops
+
+class ViewTracker: 
+  @classmethod
+  def generate_view(self, op, *args, **kwargs):
+    # we should use enums before i go insane
+    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    ShapeOPS = [ops.SUM, ops.MAX]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
+    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
+
+    args, kwargs = list(args), list(kwargs)
+
+    if op in BinaryOPS:
+      assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
+      out_s = (args[0].shape[1], args[1].shape[0]) if op == ops.MATMUL else args[0].shape 
+      return out_s
+    elif op in UnaryOPS: 
+      out_s = args[0].shape
+      return out_s
+    elif op in ShapeOPS:
+      axis, keepdim = kwargs[0], kwargs[1]
+      if axis is None: out_s = (1,)
+      else:
+        nx = list(axis) if isinstance(axis, tuple) else [axis]
+        l = list(self.shape)
+        for j in nx: l[j] = 0 
+        out_s = [i for i in l if i!=0] if keepdim == False else [1 if i == 0 else i for i in l]
+      return out_s
+    elif op in ReshapeOPS: 
+      return None
+
 
 #### TENSOR CLASS ####
 class tensor: 
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
-    self.data, self.op = np.array(data, dtype = np.float32), op
-    self.grad, self.requires_grad = np.zeros(self.data.shape, dtype = np.float32), requires_grad
+    self.data = np.array(data, dtype=np.float32)
+    self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
 
-    if LAZY: 
-      self.to_lazy()
+    if LAZY:
+      self.lazy, self.cache = True, []
+      self.buffer_size = self.data.shape if self.data is not None else None
 
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
@@ -50,7 +87,7 @@ class tensor:
   def to_lazy(self): return LazyTensor(self)
 
   @property
-  def shape(self): return self.data.shape
+  def shape(self): return self.data.shape if not LAZY else self.buffer_size
 
   @property
   def dtype(self): return self.data.dtype
@@ -59,7 +96,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"op = <{self.op.arg}>: shape = {self.data.shape}: grad_shape = {self.grad.shape}"
+    return f"op = <{self.op.arg}>: shape = {self.shape}"
 
   def __getitem__(self, args): return self.slice(args)
 
@@ -277,8 +314,7 @@ class tensor:
     x, y = self, x 
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
-    if x.shape == y.shape: 
-      return tensor(fxn.forward(x,y), op = fxn(saved = [x, y]))
+    if x.shape == y.shape: return fxn.apply(x,y)
     cst, shp, ot, axis = castable(x,y)
     # preserves casting order based on castable outputs
     if axis == 1: cst = cst.cast(shp)
@@ -294,9 +330,7 @@ class tensor:
     y = tensor(y)
     return self.mul(y).mean()
 
-# here is the idea, wrap the tensor object, delay computation through gathering ops
-# realize the output buffer by executing all ops one after the other
-# should allow us to get the # buffers needed for LLVM backend without wasting compute
+# THIS SHOULD BE INCORPORATED INTO BASE TENSOR, WE WRAP TENSOR IN MLIRBUFFER
 class LazyTensor:
   def __init__(self, tensor = None, _cache = tuple(), op = ops.LOAD, ctx = None):
     self.tensor = tensor
@@ -359,15 +393,15 @@ class LazyTensor:
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
     ShapeOPS = [ops.SUM, ops.MAX]
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
+    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
     topo, vis = [], set()
     def _toposort(s): 
-      if s not in vis: 
-        vis.add(s)
-        if s.op != ops.LOAD:
-          for child in s.cache: 
-            _toposort(child)
-          topo.append(s)
+      if s not in vis: vis.add(s)
+      if s.op != ops.LOAD:
+        for child in s.cache: 
+          _toposort(child)
+        topo.append(s)
     _toposort(self)
     for j in topo:
       if j.op in BinaryOPS:
@@ -377,8 +411,8 @@ class LazyTensor:
       elif j.op in ShapeOPS:
         axis, keepdim = j.ctx[0], j.ctx[1]
         j.tensor = j.op.apply(*[f.tensor for f in j.cache], axis=axis, keepdim=keepdim)
-      else:
-        raise NotImplementedError
+      elif j.op in ReshapeOPS: 
+        pass
     return self.tensor
 
   def __repr__(self):
