@@ -45,8 +45,18 @@ class View:
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
-    args = list(args)
+    # is this cringe
+    ReshapeOPHelpers = {
+      ops.RESHAPE: self._reshape,
+      ops.SLICE: self._slice,
+      ops.TRANSPOSE: self._transpose,
+      ops.PAD: self._pad,
+      ops.CAST: self._cast,
+    }
 
+    # tinychad -> MLIR -> LLVM IR -> WASM (llc lld)
+
+    args = list(args)
     if op in BinaryOPS:
       assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
       out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
@@ -64,21 +74,37 @@ class View:
         out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
       return out_s
     elif op in ReshapeOPS: 
-      return None
+      out_s = ReshapeOPHelpers[op](args[0], kwargs)
+      return out_s
     
-  def _reshape(self, args): 
+  def _reshape(in_s, kwargs): 
+    arg, in_s = list(kwargs['shape']), list(in_s.shape)
+    out_s = arg
+    if -1 in arg:
+      idx = arg.index(-1)
+      _cur = np.prod([j for j in arg if j != -1])
+      arg[idx] = np.prod(in_s)//_cur
+      out_s = tuple(arg)
+    return out_s
+
+    #out_s = (arg[:ind] + (_cur) + arg[ind:])
+      # example: (10,10,10) -> (2,-1,10) == (2,50,10)
+      # reshape argument: (2,-1,10)
+      # _total = 10*10*10 -> 1000
+      # _current = 2*10 -> 20 
+      # _new = _total / current -> 50
+      # new shape = (2, _new , 10)
+
+  def _slice(in_s, kwargs): 
     pass
 
-  def _slice(self, args): 
+  def _transpose(in_s, kwargs):
     pass
 
-  def _transpose(self, args):
-    pass
-
-  def _pad(self, args):
+  def _pad(in_s, kwargs):
     pass
     
-  def _cast(self, args):
+  def _cast(in_s, kwargs):
     pass
 
 
@@ -95,13 +121,11 @@ class tensor:
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
   def eye(shape, **kwargs): return tensor(np.eye(shape), **kwargs)
   def zeros(*shape, **kwargs): return tensor(np.zeros(*shape), **kwargs)
-  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi))
+  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi), **kwargs)
 
   def kaiming_uniform(*shape, a=0.01, **kwargs): 
     b = np.sqrt(3.0) * np.sqrt(2.0 / (1 + a**2)) / np.sqrt(np.prod(shape[1:]))
     return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
-
-  def to_lazy(self): return LazyTensor(self)
 
   @property
   def shape(self): return self.data.shape if not LAZY else self._lazyshape
@@ -164,8 +188,8 @@ class tensor:
   def square(self): return self*self
 
   # integrate this into apply, the only difference should be how we set the kwargs
-  def reshape_op(self, fxn, *args, **kwargs): 
-    out = fxn.apply(self, **kwargs)
+  def reshape_op(self, fxn, *args, lazy = False, **kwargs): 
+    out = fxn.apply(self, **kwargs, lazy=lazy)
     return out
 
   def mean(self, axis=None, keepdim=False): 
@@ -361,11 +385,13 @@ class tensor:
     for j in self.toposort():
       if type(j.op) in BinaryOPS:
         j = j.op.apply(*[j for j in j._cache], lazy = True)
-      if type(j.op) in UnaryOPS:
+      elif type(j.op) in UnaryOPS:
         j = j.op.apply(*[j for j in j._cache], lazy = True)
-      if type(j.op) in ShapeOPS:
+      elif type(j.op) in ShapeOPS:
         axis, keepdim = j.op.ctx[0], j.op.ctx[1]
         j = j.op.apply(*[j for j in j._cache], axis=axis, keepdim=keepdim, lazy = True)
+      elif type(j.op) in ReshapeOPS: 
+        j._cache[0].reshape_op(j.op, shape = j.op.ctx[0], lazy = True)
     self.data = j.data
     return self
 

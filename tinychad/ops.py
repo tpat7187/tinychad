@@ -8,6 +8,7 @@ class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); M
 class ShapeOPS(Enum): MAX = auto(); SUM = auto();
 class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); TRANSPOSE = auto();
 
+
 class LOAD(OP): 
   def __init__(self, saved = None):
     self.arg = type(self).__name__
@@ -133,8 +134,7 @@ class RESHAPE(OP):
 
 class CAST(OP):
   @staticmethod 
-  def forward(x, shape): 
-      return np.broadcast_to(x.data, shape)
+  def forward(x, shape): return np.broadcast_to(x.data, shape)
 
   def backward(self, out_grad, out): 
     diff = len(out_grad.shape) - len(self.saved[0].shape)
