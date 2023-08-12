@@ -15,8 +15,6 @@ class OP:
   def forward(x, y): return f"forward not implemented for {self.arg}" 
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
-  # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
-  # need to args into kwargs, and tensor into *x
   @classmethod
   def apply(self, *x, lazy = False, **kwargs):
     if LAZY and lazy == False:
@@ -54,8 +52,6 @@ class View:
       ops.CAST: self._cast,
     }
 
-    # tinychad -> MLIR -> LLVM IR -> WASM (llc lld)
-
     args = list(args)
     if op in BinaryOPS:
       assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
@@ -78,7 +74,7 @@ class View:
       return out_s
     
   def _reshape(in_s, kwargs): 
-    arg, in_s = list(kwargs['shape']), list(in_s.shape)
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
     out_s = arg
     if -1 in arg:
       idx = arg.index(-1)
@@ -87,25 +83,19 @@ class View:
       out_s = tuple(arg)
     return out_s
 
-    #out_s = (arg[:ind] + (_cur) + arg[ind:])
-      # example: (10,10,10) -> (2,-1,10) == (2,50,10)
-      # reshape argument: (2,-1,10)
-      # _total = 10*10*10 -> 1000
-      # _current = 2*10 -> 20 
-      # _new = _total / current -> 50
-      # new shape = (2, _new , 10)
-
   def _slice(in_s, kwargs): 
     pass
 
   def _transpose(in_s, kwargs):
-    pass
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
+    out_s = tuple([in_s[i] for i in arg])
+    return out_s
 
   def _pad(in_s, kwargs):
     pass
     
   def _cast(in_s, kwargs):
-    pass
+    return tuple(kwargs['args'])
 
 
 #### TENSOR CLASS ####
@@ -175,22 +165,20 @@ class tensor:
   def sum(self, axis=None, keepdim=False): return ops.SUM.apply(self, axis=axis, keepdim=keepdim)
 
   # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
-  def reshape(self, *shape) : return self.reshape_op(ops.RESHAPE, shape = shape)
+  def reshape(self, *args) : return self.reshape_op(ops.RESHAPE, args = args)
   def slice(self, *args) : return self.reshape_op(ops.SLICE, args = args)
   def pad(self, args) : return self.reshape_op(ops.PAD, args = args)
-  def transpose(self, *order) : return self.reshape_op(ops.TRANSPOSE, order = order)
-  def cast(self, shape) : return self.reshape_op(ops.CAST, shape = shape)
+  def transpose(self, *args) : return self.reshape_op(ops.TRANSPOSE, args = args)
+  def cast(self, args) : return self.reshape_op(ops.CAST, args = args)
+
+  def reshape_op(self, fxn, *args, lazy = False, **kwargs): 
+    return fxn.apply(self, **kwargs, lazy=lazy)
 
   def T(self): return tensor(self.data.transpose())
   def argmax(self, axis = None): return self.data.argmax(axis=axis)
   def matmul(self, x): return self.dot(x)
   def sigmoid(self): return self.exp().div(self.exp()+1)
   def square(self): return self*self
-
-  # integrate this into apply, the only difference should be how we set the kwargs
-  def reshape_op(self, fxn, *args, lazy = False, **kwargs): 
-    out = fxn.apply(self, **kwargs, lazy=lazy)
-    return out
 
   def mean(self, axis=None, keepdim=False): 
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -391,7 +379,7 @@ class tensor:
         axis, keepdim = j.op.ctx[0], j.op.ctx[1]
         j = j.op.apply(*[j for j in j._cache], axis=axis, keepdim=keepdim, lazy = True)
       elif type(j.op) in ReshapeOPS: 
-        j._cache[0].reshape_op(j.op, shape = j.op.ctx[0], lazy = True)
+        j._cache[0].reshape_op(j.op, args = j.op.ctx[0], lazy = True)
     self.data = j.data
     return self
 

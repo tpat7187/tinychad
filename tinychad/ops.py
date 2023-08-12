@@ -127,14 +127,14 @@ class MAX(OP):
 # reshape ops
 class RESHAPE(OP): 
   @staticmethod 
-  def forward(x, shape): return np.reshape(x.data, shape)
+  def forward(x, args): return np.reshape(x.data, args)
 
   def backward(self, out_grad, out): 
     self.saved[0].grad += out_grad.reshape(self.saved[0].shape)
 
 class CAST(OP):
   @staticmethod 
-  def forward(x, shape): return np.broadcast_to(x.data, shape)
+  def forward(x, args): return np.broadcast_to(x.data, args)
 
   def backward(self, out_grad, out): 
     diff = len(out_grad.shape) - len(self.saved[0].shape)
@@ -170,7 +170,7 @@ class PAD(OP):
 
 class TRANSPOSE(OP): 
   @staticmethod
-  def forward(x, order): return np.transpose(x.data, order)
+  def forward(x, args): return np.transpose(x.data, args)
 
   def backward(self, out_grad, out): 
     self.saved[0].grad += np.transpose(out_grad, np.argsort(*self.ctx))
