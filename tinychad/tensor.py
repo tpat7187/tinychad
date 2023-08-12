@@ -16,6 +16,7 @@ class OP:
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
   # hard to write reshape/shape ops with this due named parameters, would have to rewrite ctx as ctx['key']
+  # need to args into kwargs, and tensor into *x
   @classmethod
   def apply(self, *x, lazy = False, **kwargs):
     if LAZY and lazy == False:
@@ -164,13 +165,7 @@ class tensor:
 
   # integrate this into apply, the only difference should be how we set the kwargs
   def reshape_op(self, fxn, *args, **kwargs): 
-    l = list(*kwargs.values()) if fxn in (ops.RESHAPE, ops.SLICE) else list(kwargs.values())
-    if DEBUG: st = time.monotonic()
-    out = tensor(fxn.forward(self, *l), op = fxn(saved = [self,], ctx = list(kwargs.values())))
-    if DEBUG: 
-      et= time.monotonic() - st
-      in_s = list(n.shape for n in out.op.saved)
-      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+    out = fxn.apply(self, **kwargs)
     return out
 
   def mean(self, axis=None, keepdim=False): 
