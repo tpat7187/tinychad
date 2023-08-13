@@ -72,7 +72,8 @@ class EXP(OP):
 
 class LOG(OP): 
   @staticmethod
-  def forward(x): return np.log(x.data)
+  def forward(x): 
+    return np.log(x.data)
 
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad / self.saved[0].data

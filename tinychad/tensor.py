@@ -21,7 +21,8 @@ class OP:
       lazyshape = View.generate_view(self, *x, **kwargs)
       # TODO: find a way to do this without allocating memory, we're delaying computation but keeping memoryalloca
       out = tensor(np.empty(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
-      out._cache, out._lazyshape = x, lazyshape
+      out._cache = x
+      out._lazyshape = lazyshape
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -92,7 +93,9 @@ class View:
     return out_s
 
   def _pad(in_s, kwargs):
-    pass
+    out_s = [i+j for i,j in zip(tuple(kwargs['args']), tuple(in_s.shape))]
+    return out_s
+
     
   def _cast(in_s, kwargs):
     return tuple(kwargs['args'])
@@ -127,7 +130,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"op = <{self.op.arg}>: shape = {self.shape}"#: lazycache = {self._cache}"
+    return f"op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
 
   def __getitem__(self, args): return self.slice(args)
 
@@ -202,6 +205,7 @@ class tensor:
  
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
+    #print(ss.data)
     return m - ss.log()
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
@@ -331,8 +335,6 @@ class tensor:
       x.op.backward(x.grad, x.data)
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
-  def _apply(self, fxn, x): return fxn.forward(self, x)
-
   def cast_op(self, fxn, x):
     x, y = self, x 
     y = y if isinstance(y, tensor) else tensor([y])
@@ -370,18 +372,24 @@ class tensor:
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
-    for j in self.toposort():
-      if type(j.op) in BinaryOPS:
-        j = j.op.apply(*[j for j in j._cache], lazy = True)
-      elif type(j.op) in UnaryOPS:
-        j = j.op.apply(*[j for j in j._cache], lazy = True)
-      elif type(j.op) in ShapeOPS:
-        axis, keepdim = j.op.ctx[0], j.op.ctx[1]
-        j = j.op.apply(*[j for j in j._cache], axis=axis, keepdim=keepdim, lazy = True)
-      elif type(j.op) in ReshapeOPS: 
-        j._cache[0].reshape_op(j.op, args = j.op.ctx[0], lazy = True)
-    self.data = j.data
+    for f in self._cache: 
+      if not f.realized(): f.exec()
+    if type(self.op) in BinaryOPS:
+      s = self.op.apply(*[j for j in self._cache], lazy = True)
+    elif type(self.op) in UnaryOPS:
+      s = self.op.apply(*[j for j in self._cache], lazy = True)
+    elif type(self.op) in ShapeOPS:
+      axis, keepdim = self.op.ctx[0], self.op.ctx[1]
+      s = self.op.apply(*[j for j in self._cache], axis=axis, keepdim=keepdim, lazy = True)
+    elif type(self.op) in ReshapeOPS: 
+      s = self._cache[0].reshape_op(self.op, args = self.op.ctx[0], lazy = True)
+
+    self.data = s.data
+    self._cache = []
     return self
+  
+  # TODO: when writing lazybuffer class, a lazy tensor is realized if both items in the cache are not lazybuffers
+  def realized(self): return len(self._cache) == 0
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
