@@ -18,11 +18,10 @@ class OP:
   @classmethod
   def apply(self, *x, lazy = False, **kwargs):
     if LAZY and lazy == False:
-      lazyshape = View.generate_view(self, *x, **kwargs)
+      lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
       # TODO: find a way to do this without allocating memory, we're delaying computation but keeping memoryalloca
       out = tensor(np.empty(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
-      out._cache = x
-      out._lazyshape = lazyshape
+      out._cache, out._lazyshape = x, lazyshape
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -35,13 +34,13 @@ class OP:
 
 import tinychad.ops as ops
 
-class View: 
+class ViewTracker: 
   @classmethod
   def generate_view(self, op, *args, **kwargs):
     # we should use enums before i go insane
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
     ShapeOPS = [ops.SUM, ops.MAX]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
     # is this cringe
@@ -55,7 +54,7 @@ class View:
 
     args = list(args)
     if op in BinaryOPS:
-      assert args[0][1].shape == args[1][0].shape if op == ops.MATMUL else args[0].shape == args[1].shape
+      assert args[0].shape[1] == args[1].shape[0] if op == ops.MATMUL else args[0].shape == args[1].shape
       out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
       return out_s
     elif op in UnaryOPS: 
@@ -71,8 +70,7 @@ class View:
         out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
       return out_s
     elif op in ReshapeOPS: 
-      out_s = ReshapeOPHelpers[op](args[0], kwargs)
-      return out_s
+      return ReshapeOPHelpers[op](args[0], kwargs)
     
   def _reshape(in_s, kwargs): 
     arg, in_s = list(kwargs['args']), list(in_s.shape)
@@ -85,17 +83,17 @@ class View:
     return out_s
 
   def _slice(in_s, kwargs): 
+    # conv2d contains list -> tuple of slices
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
     pass
+
 
   def _transpose(in_s, kwargs):
     arg, in_s = list(kwargs['args']), list(in_s.shape)
-    out_s = tuple([in_s[i] for i in arg])
-    return out_s
+    return tuple([in_s[i] for i in arg])
 
   def _pad(in_s, kwargs):
-    out_s = [i+j for i,j in zip(tuple(kwargs['args']), tuple(in_s.shape))]
-    return out_s
-
+    return [i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))]
     
   def _cast(in_s, kwargs):
     return tuple(kwargs['args'])
@@ -132,7 +130,9 @@ class tensor:
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
 
-  def __getitem__(self, args): return self.slice(args)
+  def __getitem__(self, args): 
+    if isinstance(args, int): return self.slice((args))
+    if isinstance(args, tuple): return self.slice(args)
 
   def __add__(self,x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
@@ -205,7 +205,6 @@ class tensor:
  
   def logsoftmax(self, axis=-1):
     m, _, ss = self._softmax(axis) 
-    #print(ss.data)
     return m - ss.log()
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
@@ -368,15 +367,13 @@ class tensor:
   def exec(self):
     assert LAZY
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
     ShapeOPS = [ops.SUM, ops.MAX]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
     for f in self._cache: 
       if not f.realized(): f.exec()
-    if type(self.op) in BinaryOPS:
-      s = self.op.apply(*[j for j in self._cache], lazy = True)
-    elif type(self.op) in UnaryOPS:
+    if type(self.op) in (BinaryOPS + UnaryOPS):
       s = self.op.apply(*[j for j in self._cache], lazy = True)
     elif type(self.op) in ShapeOPS:
       axis, keepdim = self.op.ctx[0], self.op.ctx[1]

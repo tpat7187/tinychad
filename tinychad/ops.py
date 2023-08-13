@@ -72,8 +72,7 @@ class EXP(OP):
 
 class LOG(OP): 
   @staticmethod
-  def forward(x): 
-    return np.log(x.data)
+  def forward(x): return np.log(x.data)
 
   def backward(self, out_grad, out):
     self.saved[0].grad += out_grad / self.saved[0].data
@@ -144,11 +143,11 @@ class CAST(OP):
     out_grad = out_grad.sum(axis = t, keepdims = True)
     self.saved[0].grad += out_grad
 
-# we support LOCAL slicing [x,y,z] NOT [x][y][z] idk if this is bad 
 class SLICE(OP):
   @staticmethod
   def forward(x, args): 
-    return x.data[tuple(*args)] if isinstance(args, (slice, tuple)) else np.array([x.data[tuple(*args)]])
+    out = x.data[tuple(*args)]
+    return out if out.shape != () else [out]
 
   def backward(self, out_grad, out):
     arg = self.ctx[0]
