@@ -201,10 +201,10 @@ class test_ops(unittest.TestCase):
 
   def test_max_pool_fw(self): 
     conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,1,6,6), (2,2))
-    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,3,6,6), (3,3))
-    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,3,24,24), (3,3), stride=1)
-    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,24,24), (3,3), stride=2)
-    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,24,24), (3,3), stride=3)
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,3,6,6), (3,3))
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,3,24,24), (3,3))
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,24,24), (3,3))
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,24,24), (3,3))
 
 if __name__ == "__main__": 
   unittest.main()
