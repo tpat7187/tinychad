@@ -106,29 +106,15 @@ class SUM(OP):
 class MAX(OP): 
   @staticmethod
   def forward(x, axis, keepdim): 
-    if axis is None: 
-      return np.array([x.data.max(keepdims = keepdim)])
-    else:
-      return x.data.max(axis=axis, keepdims = keepdim)
+    return np.array([x.data.max(keepdims = keepdim)]) if axis is None else x.data.max(axis=axis, keepdims = keepdim)
 
-  # TODO: refactor for axis = N
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
-
-    # TODO: fix broadcasting issue
-    # tt = 1.0 - (self.saved[0].data < np.broadcast_to(out, self.saved[0].shape))
-    # exp = np.broadcast_to(tt.sum(axis=axis), self.saved[0].shape)
-    # self.saved[0].grad += (tt / exp) * np.broadcast_to(out_grad, self.saved[0].shape)
-
-    if axis == 1:
-      tt = np.broadcast_to(out.reshape(-1,1), self.saved[0].shape)
-    else: 
-      tt = np.broadcast_to(out, self.saved[0].shape)
-    tt = (self.saved[0].data == tt).astype(np.promote_types(self.saved[0].data.dtype, tt.dtype))
-    expand = np.broadcast_to(tt.sum(axis=axis, keepdims = kd), self.saved[0].shape)
-    max_amount = tt / expand
-    grad_output_exp = np.broadcast_to(out_grad, self.saved[0].shape)
-    self.saved[0].grad += max_amount * grad_output_exp
+    # TODO: fix broadcasting issue, reshape 
+    out_t = np.expand_dims(out, axis=axis)
+    tt = 1.0 - (self.saved[0].data < np.broadcast_to(out_t, self.saved[0].shape))
+    exp = np.broadcast_to(tt.sum(axis=axis,keepdims=True), self.saved[0].shape)
+    self.saved[0].grad += (tt / exp) * np.broadcast_to(np.expand_dims(out_grad, axis), self.saved[0].shape)
 
 # reshape ops
 class RESHAPE(OP): 

@@ -31,76 +31,7 @@ class OP:
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
     return out
 
-
 import tinychad.ops as ops
-
-class ViewTracker: 
-  @classmethod
-  def generate_view(self, op, *args, **kwargs):
-    # we should use enums before i go insane
-    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
-    ShapeOPS = [ops.SUM, ops.MAX]
-    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-    # is this cringe
-    ReshapeOPHelpers = {
-      ops.RESHAPE: self._reshape,
-      ops.SLICE: self._slice,
-      ops.TRANSPOSE: self._transpose,
-      ops.PAD: self._pad,
-      ops.CAST: self._cast,
-    }
-
-    args = list(args)
-    if op in BinaryOPS:
-      assert args[0].shape[1] == args[1].shape[0] if op == ops.MATMUL else args[0].shape == args[1].shape
-      out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
-      return out_s
-    elif op in UnaryOPS: 
-      out_s = args[0].shape
-      return out_s
-    elif op in ShapeOPS:
-      axis, keepdim = kwargs['axis'], kwargs['keepdim']
-      if axis is None: out_s = (1,)
-      else:
-        nx = list(axis) if isinstance(axis, tuple) else [axis]
-        l = list(args[0].shape)
-        for j in nx: l[j] =0 
-        out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
-      return out_s
-    elif op in ReshapeOPS: 
-      return ReshapeOPHelpers[op](args[0], kwargs)
-    
-  def _reshape(in_s, kwargs): 
-    arg, in_s = list(kwargs['args']), list(in_s.shape)
-    out_s = tuple(arg)
-    if -1 in arg:
-      idx = arg.index(-1)
-      _cur = np.prod([j for j in arg if j != -1])
-      arg[idx] = np.prod(in_s)//_cur
-      out_s = tuple(arg)
-    return out_s
-
-  def _slice(in_s, kwargs): 
-    arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
-    # TEMPORARY HACK 
-    # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
-    # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
-    out_s = np.empty(in_s.shape)[arg].shape
-    out_s = (1,) if out_s == () else out_s
-    return out_s 
-
-  def _transpose(in_s, kwargs):
-    arg, in_s = list(kwargs['args']), list(in_s.shape)
-    return tuple([in_s[i] for i in arg])
-
-  def _pad(in_s, kwargs):
-    return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
-    
-  def _cast(in_s, kwargs):
-    return tuple(kwargs['args'])
-
 
 # **** TENSOR CLASS ****
 class tensor: 
@@ -111,12 +42,22 @@ class tensor:
     if LAZY: 
       self._cache, self._lazyshape = [], self.data.shape if type(op) == ops.LOAD else ()
 
+  @staticmethod
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
+
+  @staticmethod
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
+
+  @staticmethod
   def eye(shape, **kwargs): return tensor(np.eye(shape), **kwargs)
+
+  @staticmethod
   def zeros(*shape, **kwargs): return tensor(np.zeros(*shape), **kwargs)
+
+  @staticmethod
   def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi), **kwargs)
 
+  @staticmethod
   def kaiming_uniform(*shape, a=0.01, **kwargs): 
     b = np.sqrt(3.0) * np.sqrt(2.0 / (1 + a**2)) / np.sqrt(np.prod(shape[1:]))
     return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
@@ -220,11 +161,9 @@ class tensor:
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
-    if bias is not None: 
-      out = out + bias
+    if bias is not None: out = out + bias
     return out 
 
-  # TODO: this still doesnt work for N > 1
   def max_pool2d(self, kernel_size, stride=1):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
@@ -458,3 +397,69 @@ def is_castable(x, y):
       return False
   return True
 
+class ViewTracker: 
+  @classmethod
+  def generate_view(self, op, *args, **kwargs):
+    # we should use enums before i go insane
+    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
+    ShapeOPS = [ops.SUM, ops.MAX]
+    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
+
+    # is this cringe
+    ReshapeOPHelpers = {
+      ops.RESHAPE: self._reshape,
+      ops.SLICE: self._slice,
+      ops.TRANSPOSE: self._transpose,
+      ops.PAD: self._pad,
+      ops.CAST: self._cast,
+    }
+
+    args = list(args)
+    if op in BinaryOPS:
+      assert args[0].shape[1] == args[1].shape[0] if op == ops.MATMUL else args[0].shape == args[1].shape
+      out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
+      return out_s
+    elif op in UnaryOPS: 
+      out_s = args[0].shape
+      return out_s
+    elif op in ShapeOPS:
+      axis, keepdim = kwargs['axis'], kwargs['keepdim']
+      if axis is None: out_s = (1,)
+      else:
+        nx = list(axis) if isinstance(axis, tuple) else [axis]
+        l = list(args[0].shape)
+        for j in nx: l[j] =0 
+        out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
+      return out_s
+    elif op in ReshapeOPS: 
+      return ReshapeOPHelpers[op](args[0], kwargs)
+    
+  def _reshape(in_s, kwargs): 
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
+    out_s = tuple(arg)
+    if -1 in arg:
+      idx = arg.index(-1)
+      _cur = np.prod([j for j in arg if j != -1])
+      arg[idx] = np.prod(in_s)//_cur
+      out_s = tuple(arg)
+    return out_s
+
+  def _slice(in_s, kwargs): 
+    arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
+    # TEMPORARY HACK 
+    # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
+    # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
+    out_s = np.empty(in_s.shape)[arg].shape
+    out_s = (1,) if out_s == () else out_s
+    return out_s 
+
+  def _transpose(in_s, kwargs):
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
+    return tuple([in_s[i] for i in arg])
+
+  def _pad(in_s, kwargs):
+    return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
+    
+  def _cast(in_s, kwargs):
+    return tuple(kwargs['args'])

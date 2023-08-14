@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import unittest
 
+
 # TODO: specify input shapes, casting tests
 def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     np.random.seed(0)
@@ -106,8 +107,8 @@ def conv_pool_test_helper_fw(tinychadfxn, torchfxn, input_shape, kernel_size, bi
     y = x.sum().backward()
     yt = xt.sum().backward()
   if tinychadfxn == tensor.max_pool2d:
-    x = tinychadfxn(a, kernel_size, stride=stride)
-    xt = torchfxn(at, kernel_size, stride=stride)
+    x = tinychadfxn(a, kernel_size=kernel_size[0], stride=kernel_size[0])
+    xt = torchfxn(at, kernel_size=kernel_size[0], stride=kernel_size[0])
     y = x.sum().backward()
     yt = xt.sum().backward()
 
@@ -198,14 +199,12 @@ class test_ops(unittest.TestCase):
     conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (3,2,26,26), (3,3), stride=2)
     conv_pool_test_helper_fw(tensor.avg_pool2d, torch.nn.functional.avg_pool2d, (5,1,26,26), (3,3), stride=3)
 
-  '''
   def test_max_pool_fw(self): 
-    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,1,26,26), (3,3))
-    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,3,5,5), (3,3))
-    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,3,26,26), (3,3), stride=1)
-    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,26,26), (3,3), stride=2)
-    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,26,26), (3,3), stride=3)
-  '''
+    conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,1,6,6), (2,2))
+    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (1,3,6,6), (3,3))
+    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,3,24,24), (3,3), stride=1)
+    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,24,24), (3,3), stride=2)
+    #conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,24,24), (3,3), stride=3)
 
 if __name__ == "__main__": 
   unittest.main()
