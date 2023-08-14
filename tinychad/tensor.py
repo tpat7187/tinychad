@@ -74,7 +74,7 @@ class ViewTracker:
     
   def _reshape(in_s, kwargs): 
     arg, in_s = list(kwargs['args']), list(in_s.shape)
-    out_s = arg
+    out_s = tuple(arg)
     if -1 in arg:
       idx = arg.index(-1)
       _cur = np.prod([j for j in arg if j != -1])
@@ -83,23 +83,26 @@ class ViewTracker:
     return out_s
 
   def _slice(in_s, kwargs): 
-    # conv2d contains list -> tuple of slices
-    arg, in_s = list(kwargs['args']), list(in_s.shape)
-    pass
-
+    arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
+    # TEMPORARY HACK 
+    # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
+    # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
+    out_s = np.empty(in_s.shape)[arg].shape
+    out_s = (1,) if out_s == () else out_s
+    return out_s 
 
   def _transpose(in_s, kwargs):
     arg, in_s = list(kwargs['args']), list(in_s.shape)
     return tuple([in_s[i] for i in arg])
 
   def _pad(in_s, kwargs):
-    return [i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))]
+    return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
     
   def _cast(in_s, kwargs):
     return tuple(kwargs['args'])
 
 
-#### TENSOR CLASS ####
+# **** TENSOR CLASS ****
 class tensor: 
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
     self.data = np.array(data, dtype=np.float32)
@@ -222,17 +225,13 @@ class tensor:
     return out 
 
   # TODO: this still doesnt work for N > 1
-  def max_pool2d(self, kernel_size, stride=None):
+  def max_pool2d(self, kernel_size, stride=1):
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
     k_h, k_w = kernel_size
-    out_h, out_w = (H - k_h) //stride + 1, (W - k_w)//stride + 1
-    k, i, j = self.get_im2col_indices(k_h, k_w, stride=stride)
-    cols = self[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
-    cols_max = np.argmax(cols.data, axis=0)
-    cols = cols[cols_max, np.arange(cols.shape[1])]
-    out = cols.reshape(out_h, out_w, N, Cin).transpose(2,3,0,1)
+    res = self.reshape(N, Cin, H // k_h, k_h, W // k_w, k_w)
+    out = res.max(axis=3).max(axis=4)
     return out
 
   def avg_pool2d(self, kernel_size, stride=None):
@@ -344,8 +343,18 @@ class tensor:
     if axis == 1: cst = cst.cast(shp)
     if axis == 0: ot = ot.cast(shp)
     return fxn.apply(cst, ot)
+  
+  # one hot encodes tensor acts on data so as to not join computation graph
+  @classmethod
+  def OHE(self, real, classes):
+    r = real.flatten().astype(np.int32)
+    y = np.zeros((r.shape[0], classes), np.float32)
+    y[range(y.shape[0]), r] = -1.0*classes
+    y = y.reshape(list(real.shape) + [classes])
+    y = tensor(y)
+    return y
 
-  def cross_entropy_loss(self, real):
+  def NLLLoss(self, real):
     classes = self.shape[-1]
     r = real.flatten().astype(np.int32)
     y = np.zeros((r.shape[0], classes), np.float32)
@@ -353,6 +362,20 @@ class tensor:
     y = y.reshape(list(real.shape) + [classes])
     y = tensor(y)
     return self.mul(y).mean()
+
+  def cross_entropy(self, real, reduction = 'mean', smoothing = 0.0):
+    classes = self.shape[-1]
+    r = real.flatten().astype(np.int32)
+    y = np.zeros((r.shape[0], classes), np.float32)
+    y[range(y.shape[0]), r] = -1.0*classes
+    y = y.reshape(list(real.shape) + [classes])
+    y = tensor(y)
+
+    if reduction=='none': 
+      return -self.logsoftmax(axis=1).mul(y).sum(axis=1)
+    if reduction=='sum': 
+      return -self.logsoftmax(axis=1).mul(y).sum(axis=1).sum()
+    return self.logsoftmax(axis=1).mul(y).sum(axis=1,keepdim=True).mean()
 
   def get_buffers(self): 
     assert LAZY, "cannot get buffers without lazy evaluation enabled"
