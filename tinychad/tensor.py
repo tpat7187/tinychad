@@ -91,6 +91,7 @@ class tensor:
   def __radd__(self,x): return self.add(x)
   def __rsub__(self,x): return self.sub(x).neg()
   def __rmul__(self,x): return self.mul(x)
+  def __rtruediv__(self,x): return self.div(x)
 
   def __iadd__(self,x): return self.add(x)
   def __isub__(self,x): return self.sub(x)
@@ -139,6 +140,8 @@ class tensor:
     ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
+
+  def reciprocal(self) -> tensor: return tensor.ones((self.shape)) / self
 
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
@@ -201,13 +204,15 @@ class tensor:
     j = j0.reshape(-1, 1) + j1.reshape(1, -1)
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
-
-  def batchnorm2d(self, weight:tensor, bias:Optional[tensor]=None, eps=1e-5) -> tensor:
+  
+  # running mean/std are tensors of size (1,1,C,1)
+  def batchnorm2d(self, weight:tensor, bias:tensor, running_mean:tensor, running_var:tensor, eps=1e-5, momentum=0) -> tensor:
     assert len(self.shape) == 4
-    mn = self.mean(axis=(0,2,3), keepdim=True)
-    vr = self.var(axis=(0,2,3), keepdim=True)
-    norm = (self - mn) / (vr + eps).sqrt()
-    out = weight * norm + bias if bias is not None else weight * norm
+    N,C,H,W = self.shape
+    mean = self.mean(axis=(0,2,3),keepdim=True)
+    var = (self - mean).square().mean(axis=(0,2,3),keepdim=True)
+    x_h = (self - mean) / (var + eps)
+    out = weight * x_h + bias if bias is not None else weight*x_h
     return out
 
   def pad_to(self, shape:Tuple[int, ...]) -> tensor:
@@ -278,7 +283,7 @@ class tensor:
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
   def cast_op(self, fxn: ops.op, x: tensor) -> tensor:
-    x, y = self, x 
+    x, y = self, x
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: return fxn.apply(x,y)
@@ -286,7 +291,7 @@ class tensor:
     # preserves casting order based on castable outputs
     if axis == 1: cst = cst.cast(shp)
     if axis == 0: ot = ot.cast(shp)
-    return fxn.apply(cst, ot)
+    return fxn.apply(cst, ot) 
   
   # one hot encodes tensor acts on data so as to not join computation graph
   @classmethod
@@ -374,16 +379,22 @@ class Conv2d:
     return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
 
 class BatchNorm2d:
-  def __init__(self, num_features, affine=True):
-    if affine == True:
+  def __init__(self, num_features, affine=True, momentum=0, track=False, eps=1e-5):
+    self.momentum, self.eps, self.track = momentum, eps, track
+    if affine:
       self.w = tensor.ones((1,num_features,1,1))
       self.b = tensor.ones((1,num_features,1,1))
     else:
       self.w, self.b = None, None
+    self.running_mean = tensor.zeros(num_features)
+    self.running_var = tensor.zeros(num_features)
 
-  # TODO: add self.training property st we can track running mean/std
   def __call__(self, x:tensor) -> tensor:
-    return x.batchnorm2d(weight=self.w, bias=self.b)
+    if self.track:
+      self.frunning_mean = (1.0 - self.momentum) * self.running_mean + self.momentum #.mul(currentmean)
+      self.running_var = (1.0 - self.momentum) * self.running_var + self.momentum #.mul(currentvar)
+
+    return x.batchnorm2d(self.w, self.b, self.running_mean, self.running_var, self.eps, self.momentum)
 
 # returns cast, target, and buffer
 def castable(x: tensor, y: tensor) -> Tuple[tensor, Tuple[int, ...], tensor, int]:
