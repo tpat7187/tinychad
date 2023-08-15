@@ -19,9 +19,7 @@ class OP:
   def apply(self, *x, lazy = False, **kwargs):
     if LAZY and lazy == False:
       lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
-      # TODO: find a way to do this without allocating memory, we're delaying computation but keeping memoryalloca
-      out = tensor(lazybuffer(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
-      out._cache = x
+      out = tensor(LazyBuffer(lazyshape, self), op = self(saved = [*x], ctx = list(kwargs.values())))
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -33,24 +31,16 @@ class OP:
 
 import tinychad.ops as ops
 
-
-class lazybuffer: 
-  def __init__(self, shape):
-    self.shape = shape
-
 # **** TENSOR CLASS ****
 class tensor: 
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
-    if isinstance(data, (np.ndarray, lazybuffer)): 
+    if isinstance(data, (np.ndarray, LazyBuffer)): 
       self.data = data
 
     if isinstance(data, (int, list)): 
       self.data = np.array(data)
 
     self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
-
-    if LAZY: 
-      self._cache= [] 
 
   @staticmethod
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
@@ -86,7 +76,7 @@ class tensor:
 
   def __getitem__(self, args): 
     if isinstance(args, int): return self.slice((args))
-    if isinstance(args, tuple): return self.slice(args)
+    elif isinstance(args, tuple): return self.slice(args)
 
   def __add__(self,x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
@@ -229,15 +219,12 @@ class tensor:
   # TODO: fix this with transpose instead of roll
   def cat(self, *args, axis=0):  
     assert all(len(x.shape) == len(self.shape) for x in args)
-    out_shape, args = list(self.shape), list(args)
-    out_shape[axis] = out_shape[axis]*(len(args)+1)
-    out_t = [[0,0] for _ in range(len(self.shape))]
-    out_t[axis][1] = args[0].shape[axis] * len(args)
-    out = self.pad(out_t)
-    for j in range(len(args)): 
-      args[j] = args[j].pad(out_t).roll((j+1)*args[j].shape[axis], axis)
-      out += args[j]
-    return out
+    cache, out = [self, *args], []
+    for j in range(len([self, *args])):
+      pad_t = [[0,0] for _ in range(len(self.shape))]
+      pad_t[axis] = [self.shape[0]*j, self.shape[0]*(len(args)*1-j)]
+      out.append(cache[j].pad(pad_t))
+    return sum(out)
 
   # input padded kernel and input size, output doubly blocked circulant matrix
   def tpltz(self, input_size, kernel_size):
@@ -332,8 +319,8 @@ class tensor:
     cache = set()
     def _get_buffers(s):
       if id(s) not in cache and type(s.op) != ops.LOAD:
-        cache.add((hex(id(s)), s.shape))
-        [_get_buffers(child) for child in s._cache if type(s.op) != ops.LOAD]
+        cache.add((hex(id(s)), s.shape, type(s.op)))
+        [_get_buffers(child) for child in s.op.saved if type(s.op) != ops.LOAD]
     _get_buffers(self)
     return cache
 
@@ -344,24 +331,20 @@ class tensor:
     ShapeOPS = [ops.SUM, ops.MAX]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
-    for f in self._cache: 
+    for f in self.op.saved: 
       if not f.realized(): f.exec()
     if type(self.op) in (BinaryOPS + UnaryOPS):
-      s = self.op.apply(*[j for j in self._cache], lazy = True)
+      s = self.op.apply(*[j for j in self.op.saved], lazy = True)
     elif type(self.op) in ShapeOPS:
       axis, keepdim = self.op.ctx[0], self.op.ctx[1]
-      s = self.op.apply(*[j for j in self._cache], axis=axis, keepdim=keepdim, lazy = True)
+      s = self.op.apply(*[j for j in self.op.saved], axis=axis, keepdim=keepdim, lazy = True)
     elif type(self.op) in ReshapeOPS: 
-      s = self._cache[0].reshape_op(self.op, args = self.op.ctx[0], lazy = True)
-
+      s = self.op.saved[0].reshape_op(self.op, args = self.op.ctx[0], lazy = True)
     self.data = s.data
-    self._cache = []
     return self
   
-  # TODO: when writing lazybuffer class, a lazy tensor is realized if both items in the cache are not lazybuffers
-  def realized(self): 
-    if LAZY: return len(self._cache) == 0
-    else: return True
+  # if NOT lazybuffer then its realized
+  def realized(self): return not isinstance(self.data, LazyBuffer)
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
@@ -409,6 +392,10 @@ def is_castable(x, y):
     else: 
       return False
   return True
+
+class LazyBuffer: 
+  def __init__(self, shape, op):
+    self.shape, self.op = shape, op
 
 class ViewTracker: 
   @classmethod
