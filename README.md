@@ -8,11 +8,12 @@ goals:
 
 TODO: 
   * computation graph
-  * look into LLVMlite (how can we recreate matmul and other binary ops in LLVM IR, WHAT ABOUT MLIR) 
-    * lazy evaluation-esque runtime for assigning buffers and shapes
-  * convolutions
-    * fix pooling (use reshape method over im2col [fix MAX backward for axis > 1]
-    * Write efficientNet (HOT DOG, RED HOT) 
+  * LLVM/MLIR backend
+    * test llvmlite/ctypes with lazybuffers
+    * MLIR/LLVM kelido toy-dialect
+  * update training/testing
+    * match torch on NLLL and CrossEntropyLoss
+    * convnet for MNIST
   * state dict for transfer learning
 
 things to read: 

@@ -20,8 +20,8 @@ class OP:
     if LAZY and lazy == False:
       lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
       # TODO: find a way to do this without allocating memory, we're delaying computation but keeping memoryalloca
-      out = tensor(np.empty(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
-      out._cache, out._lazyshape = x, lazyshape
+      out = tensor(lazybuffer(lazyshape), op = self(saved = [*x], ctx = list(kwargs.values())))
+      out._cache = x
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -33,14 +33,24 @@ class OP:
 
 import tinychad.ops as ops
 
+
+class lazybuffer: 
+  def __init__(self, shape):
+    self.shape = shape
+
 # **** TENSOR CLASS ****
 class tensor: 
   def __init__(self, data, op = ops.LOAD(), requires_grad = False):
-    self.data = np.array(data, dtype=np.float32)
+    if isinstance(data, (np.ndarray, lazybuffer)): 
+      self.data = data
+
+    if isinstance(data, (int, list)): 
+      self.data = np.array(data)
+
     self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
 
     if LAZY: 
-      self._cache, self._lazyshape = [], self.data.shape if type(op) == ops.LOAD else ()
+      self._cache= [] 
 
   @staticmethod
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
@@ -63,7 +73,7 @@ class tensor:
     return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
 
   @property
-  def shape(self): return self.data.shape if not LAZY else self._lazyshape
+  def shape(self): return self.data.shape
 
   @property
   def dtype(self): return self.data.dtype
@@ -264,6 +274,7 @@ class tensor:
     return topo
 
   def backward(self):
+    self.exec()
     assert(self.grad.shape == (1,))
     self.grad = np.ones(self.grad.shape)
     for x in reversed(self.toposort()): 
@@ -327,7 +338,7 @@ class tensor:
     return cache
 
   def exec(self):
-    assert LAZY
+    if self.realized(): return self
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
     ShapeOPS = [ops.SUM, ops.MAX]
@@ -348,7 +359,9 @@ class tensor:
     return self
   
   # TODO: when writing lazybuffer class, a lazy tensor is realized if both items in the cache are not lazybuffers
-  def realized(self): return len(self._cache) == 0
+  def realized(self): 
+    if LAZY: return len(self._cache) == 0
+    else: return True
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 

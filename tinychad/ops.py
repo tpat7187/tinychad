@@ -110,9 +110,10 @@ class MAX(OP):
 
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]
-    out_t = np.expand_dims(out, axis=axis) if axis is not None else out
-    out_grad = np.expand_dims(out_grad, axis=axis) if axis is not None else out_grad
-    tt = 1.0 - (self.saved[0].data < np.broadcast_to(out_t, self.saved[0].shape))
+    if kd is False:
+      out = np.expand_dims(out, axis=axis) if axis is not None else out
+      out_grad = np.expand_dims(out_grad, axis=axis) if axis is not None else out_grad
+    tt = 1.0 - (self.saved[0].data < np.broadcast_to(out, self.saved[0].shape))
     exp = np.broadcast_to(tt.sum(axis=axis,keepdims=True), self.saved[0].shape)
     self.saved[0].grad += (tt / exp) * np.broadcast_to(out_grad, self.saved[0].shape)
 
