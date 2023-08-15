@@ -45,9 +45,6 @@ def test_linear():
       x = x.log_softmax(dim=1)
       return x 
 
-
-
-
   tc_model = bobnet() 
   to_model = torchnet()
 
@@ -72,7 +69,7 @@ def test_linear():
     np.testing.assert_allclose(s.data, st.detach().numpy(), atol =1e-6 , rtol =1e-3)
 
     st_l = loss_fn(st, torch.tensor(R))
-    s_l = s.cross_entropy_loss(R_tc)
+    s_l = s.NLLLoss(R_tc)
 
     tinychad_optim.zero_grad()
     torch_optim.zero_grad()
@@ -156,11 +153,4 @@ def test_conv():
 
 if __name__ == "__main__": 
   test_conv()
-
-
-
-
-
-
-
 

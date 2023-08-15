@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np 
+import mypy
 import os
 import time
 from typing import List, Optional, Tuple, Union, Type
@@ -8,7 +9,7 @@ DEBUG = os.getenv("DEBUG")
 LAZY = os.getenv("LAZY")
 
 class OP: 
-  def __init__(self, saved = None, ctx = None):
+  def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
     self.arg = type(self).__name__
     self.saved = np.array(saved)
     self.ctx = ctx
@@ -34,6 +35,7 @@ import tinychad.ops as ops
 
 # **** TENSOR CLASS ****
 class tensor: 
+  __slots__ = "data", "requires_grad", "op", "grad"
   def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = False):
     if isinstance(data, (np.ndarray, LazyBuffer)): 
       self.data = data
@@ -119,14 +121,13 @@ class tensor:
   def transpose(self, *args) : return self.reshape_op(ops.TRANSPOSE, args = args)
   def cast(self, args) : return self.reshape_op(ops.CAST, args = args)
 
-  def reshape_op(self, fxn, *args, lazy = False, **kwargs): 
+  def reshape_op(self, fxn:ops.OP, *args:tensor, lazy:Optional[bool] = False, **kwargs) -> tensor: 
     return fxn.apply(self, **kwargs, lazy=lazy)
 
-  def T(self): return tensor(self.data.transpose())
-  def argmax(self, axis = None): return self.data.argmax(axis=axis)
+  def T(self) -> tensor: return tensor(self.data.transpose())
   def matmul(self, x): return self.dot(x)
-  def sigmoid(self): return self.exp().div(self.exp()+1)
-  def square(self): return self*self
+  def sigmoid(self) -> tensor: return self.exp().div(self.exp()+1)
+  def square(self) -> tensor: return self*self
 
   def mean(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
@@ -144,7 +145,7 @@ class tensor:
     e = m.exp() 
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis:Optional[int] = -1) -> tensor:
+  def softmax(self, axis:Optional[int]=-1) -> tensor:
     _, e, ss = self._softmax(axis) 
     return e.div(ss)
  
@@ -154,7 +155,7 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight:tensor, bias:Optional[tensor]=None, padding:int=0, stride:int=1) -> tensor:
+  def conv2d(self, weight:tensor, bias:Optional[tensor]=None, padding=0, stride=1) -> tensor:
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
     out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
@@ -358,18 +359,18 @@ class Linear:
     self.w = tensor.randn(in_shape, out_shape)
     self.b = tensor.randn(out_shape) if bias else None
 
-  def __call__(self, x): 
+  def __call__(self, x: tensor) -> tensor: 
     return x.dot(self.w).add(self.b)
 
 class Conv2d: 
-  def __init__(self, in_channels, out_channels, kernel_size, padding=1, stride=1, bias = True):
+  def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=1, stride=1, bias=True):
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     self.w = tensor.randn(out_channels, in_channels, *kernel_size)
     self.w = tensor.kaiming_uniform(out_channels, in_channels, *kernel_size, a = np.sqrt(5))
     self.b = tensor.randn(1,out_channels,1,1) if bias else None 
 
-  def __call__(self, x):
+  def __call__(self, x:tensor) -> tensor:
     return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
 
 class BatchNorm2d:
@@ -381,7 +382,7 @@ class BatchNorm2d:
       self.w, self.b = None, None
 
   # TODO: add self.training property st we can track running mean/std
-  def __call__(self, x):
+  def __call__(self, x:tensor) -> tensor:
     return x.batchnorm2d(weight=self.w, bias=self.b)
 
 # returns cast, target, and buffer
@@ -391,7 +392,7 @@ def castable(x: tensor, y: tensor) -> Tuple[tensor, Tuple[int, ...], tensor, int
   if x.shape != out: return x, out, y, 1
   if y.shape != out: return x, out, y, 0
 
-def is_castable(x: tensor, y:tensor) -> bool:
+def is_castable(x: Tuple[int, ...], y:Tuple[int, ...]) -> bool:
   for a, b in zip(x[::-1], y[::-1]): 
     if a == 1 or b == 1 or a == b:
       pass
@@ -400,7 +401,7 @@ def is_castable(x: tensor, y:tensor) -> bool:
   return True
 
 class LazyBuffer: 
-  def __init__(self, shape: Tuple[int, ...], op: ops.OP):
+  def __init__(self, shape:Tuple[int, ...], op:ops.OP):
     self.shape, self.op = shape, op
 
 class ViewTracker: 

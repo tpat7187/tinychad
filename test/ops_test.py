@@ -38,7 +38,7 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
       xt = torchfxn(at, dim = axis).values if axis != None else torchfxn(at)
 
     try: 
-      np.testing.assert_allclose(x.data, xt.detach().numpy(), atol =1e-6 , rtol =1e-3)
+      np.testing.assert_allclose(x.exec().data, xt.detach().numpy(), atol =1e-6 , rtol =1e-3)
     except Exception: 
       raise Exception(f"<fw pass failure> tinychad: {x.data}, pytorch{xt.detatch().numpy()}")
 
