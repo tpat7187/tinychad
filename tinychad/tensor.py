@@ -1,7 +1,8 @@
+from __future__ import annotations
 import numpy as np 
 import os
 import time
-from typing import NewType, Type 
+from typing import List, Optional, Tuple, Union, Type
 
 DEBUG = os.getenv("DEBUG") 
 LAZY = os.getenv("LAZY")
@@ -16,7 +17,7 @@ class OP:
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
   @classmethod
-  def apply(self, *x, lazy = False, **kwargs):
+  def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if LAZY and lazy == False:
       lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
       out = tensor(LazyBuffer(lazyshape, self), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -33,11 +34,11 @@ import tinychad.ops as ops
 
 # **** TENSOR CLASS ****
 class tensor: 
-  def __init__(self, data, op = ops.LOAD(), requires_grad = False):
+  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = False):
     if isinstance(data, (np.ndarray, LazyBuffer)): 
       self.data = data
 
-    if isinstance(data, (int, list)): 
+    if isinstance(data, (int, list, float)): 
       self.data = np.array(data)
 
     self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
@@ -63,7 +64,7 @@ class tensor:
     return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
 
   @property
-  def shape(self): return self.data.shape
+  def shape(self) -> tuple[int, ...]: return self.data.shape
 
   @property
   def dtype(self): return self.data.dtype
@@ -78,7 +79,7 @@ class tensor:
     if isinstance(args, int): return self.slice((args))
     elif isinstance(args, tuple): return self.slice(args)
 
-  def __add__(self,x): return self.add(x)
+  def __add__(self, x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
   def __mul__(self,x): return self.mul(x)
   def __matmul__(self,x): return self.dot(x)
@@ -127,33 +128,33 @@ class tensor:
   def sigmoid(self): return self.exp().div(self.exp()+1)
   def square(self): return self*self
 
-  def mean(self, axis=None, keepdim=False): 
+  def mean(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     ss = out * (np.prod(out.shape) / np.prod(self.shape))
     return ss
 
-  def var(self, axis=None, keepdim=False): 
+  def var(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     mn = self.mean(axis=axis, keepdim=keepdim)
     ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
 
-  def _softmax(self, axis): 
+  def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp() 
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis = -1):
+  def softmax(self, axis:Optional[int] = -1) -> tensor:
     _, e, ss = self._softmax(axis) 
     return e.div(ss)
  
-  def logsoftmax(self, axis=-1):
+  def logsoftmax(self, axis:Optional[int]=-1) -> tensor:
     m, _, ss = self._softmax(axis) 
     return m - ss.log()
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight, bias=None, padding=0, stride=1):
+  def conv2d(self, weight:tensor, bias:Optional[tensor]=None, padding:int=0, stride:int=1) -> tensor:
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
     out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
@@ -164,7 +165,7 @@ class tensor:
     if bias is not None: out = out + bias
     return out 
 
-  def max_pool2d(self, kernel_size, stride=1):
+  def max_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:int=1) -> tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
@@ -173,7 +174,7 @@ class tensor:
     out = res.max(axis=3).max(axis=4)
     return out
 
-  def avg_pool2d(self, kernel_size, stride=None):
+  def avg_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:Optional[int]=None) -> tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
@@ -186,7 +187,7 @@ class tensor:
     return out
 
   # input image, kernel_h, kernel_w
-  def get_im2col_indices(self, f_h, f_w, padding=0, stride=1):
+  def get_im2col_indices(self, f_h:int, f_w:int, padding:Optional[int]=0, stride:Optional[int]=1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     N, C, H, W = self.shape
     out_height = ((H+2 * padding - f_h) //stride) + 1
     out_width = ((W+2 * padding - f_w) //stride) + 1
@@ -200,7 +201,7 @@ class tensor:
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
 
-  def batchnorm2d(self, weight, bias = None, eps=1e-5):
+  def batchnorm2d(self, weight:tensor, bias:Optional[tensor]=None, eps=1e-5) -> tensor:
     assert len(self.shape) == 4
     mn = self.mean(axis=(0,2,3), keepdim=True)
     vr = self.var(axis=(0,2,3), keepdim=True)
@@ -208,7 +209,7 @@ class tensor:
     out = weight * norm + bias if bias is not None else weight * norm
     return out
 
-  def pad_to(self, shape): 
+  def pad_to(self, shape:Tuple[int, ...]) -> tensor:
     in_s, o_s, ss = self.shape, shape, 0
     p_w = [[0,0] for _ in range(len(self.shape))]
     for i,j in zip(self.shape, shape):
@@ -217,7 +218,7 @@ class tensor:
     return self.pad(p_w)
 
   # TODO: fix this with transpose instead of roll
-  def cat(self, *args, axis=0):  
+  def cat(self, *args:tensor, axis:Optional[int]=0) -> tensor:
     assert all(len(x.shape) == len(self.shape) for x in args)
     cache, out = [self, *args], []
     for j in range(len([self, *args])):
@@ -242,13 +243,18 @@ class tensor:
     out = tensor.cat(*[_ for _ in tpltz], axis=1)
     return out
 
-  def unsqueeze(self, axis): 
+  def unsqueeze(self, axis: int) -> tensor:
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
+    return self.reshape(*dim)
+
+  def squeeze(self, axis: int) -> tensor:
+    assert self.shape[axis] == 1, f"cannot squeeze {self} along axis with value {self.shape[axis]}"
+    dim = (self.shape[:axis] + self.shape[1+axis:])
     return self.reshape(*dim)
 
   def flatten(self): return self.reshape(-1,)
  
-  def toposort(self): 
+  def toposort(self) -> Tuple[tensor, ...]: 
     topo, vis = [], []
     def _toposort(s): 
       if s not in vis: 
@@ -270,7 +276,7 @@ class tensor:
       x.op.backward(x.grad, x.data)
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
-  def cast_op(self, fxn, x):
+  def cast_op(self, fxn: ops.op, x: tensor) -> tensor:
     x, y = self, x 
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
@@ -314,7 +320,7 @@ class tensor:
       return -self.logsoftmax(axis=1).mul(y).sum(axis=1).sum()
     return self.logsoftmax(axis=1).mul(y).sum(axis=1,keepdim=True).mean()
 
-  def get_buffers(self): 
+  def get_buffers(self) -> Tuple: 
     assert LAZY, "cannot get buffers without lazy evaluation enabled"
     cache = set()
     def _get_buffers(s):
@@ -324,7 +330,7 @@ class tensor:
     _get_buffers(self)
     return cache
 
-  def exec(self):
+  def exec(self) -> tensor:
     if self.realized(): return self
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
@@ -344,7 +350,7 @@ class tensor:
     return self
   
   # if NOT lazybuffer then its realized
-  def realized(self): return not isinstance(self.data, LazyBuffer)
+  def realized(self) -> bool: return not isinstance(self.data, LazyBuffer)
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
@@ -379,13 +385,13 @@ class BatchNorm2d:
     return x.batchnorm2d(weight=self.w, bias=self.b)
 
 # returns cast, target, and buffer
-def castable(x, y): 
+def castable(x: tensor, y: tensor) -> Tuple[tensor, Tuple[int, ...], tensor, int]:
   assert is_castable(x.shape,y.shape), f"shapes {x.shape} and {y.shape} are not castable"
   out = np.broadcast_shapes(x.shape, y.shape)
   if x.shape != out: return x, out, y, 1
   if y.shape != out: return x, out, y, 0
 
-def is_castable(x, y): 
+def is_castable(x: tensor, y:tensor) -> bool:
   for a, b in zip(x[::-1], y[::-1]): 
     if a == 1 or b == 1 or a == b:
       pass
@@ -394,12 +400,12 @@ def is_castable(x, y):
   return True
 
 class LazyBuffer: 
-  def __init__(self, shape, op):
+  def __init__(self, shape: Tuple[int, ...], op: ops.OP):
     self.shape, self.op = shape, op
 
 class ViewTracker: 
   @classmethod
-  def generate_view(self, op, *args, **kwargs):
+  def generate_view(self, op: ops.OP, *args, **kwargs) -> Tuple[int, ...]:
     # we should use enums before i go insane
     BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
     UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
@@ -435,7 +441,7 @@ class ViewTracker:
     elif op in ReshapeOPS: 
       return ReshapeOPHelpers[op](args[0], kwargs)
     
-  def _reshape(in_s, kwargs): 
+  def _reshape(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
     arg, in_s = list(kwargs['args']), list(in_s.shape)
     out_s = tuple(arg)
     if -1 in arg:
@@ -445,7 +451,7 @@ class ViewTracker:
       out_s = tuple(arg)
     return out_s
 
-  def _slice(in_s, kwargs): 
+  def _slice(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
     arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
     # TEMPORARY HACK 
     # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
@@ -454,12 +460,12 @@ class ViewTracker:
     out_s = (1,) if out_s == () else out_s
     return out_s 
 
-  def _transpose(in_s, kwargs):
+  def _transpose(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
     arg, in_s = list(kwargs['args']), list(in_s.shape)
     return tuple([in_s[i] for i in arg])
 
-  def _pad(in_s, kwargs):
+  def _pad(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
     return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
     
-  def _cast(in_s, kwargs):
+  def _cast(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
     return tuple(kwargs['args'])
