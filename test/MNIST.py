@@ -33,10 +33,8 @@ def train(model, optim, xtrain, ytrain):
     ind = np.random.randint(0,59000, size=BS)
     inp = xtrain[ind][:].reshape(BS,-1).astype(np.float32)
     out = model.forward(tensor(inp))
-    res = ytrain[ind]
-
-    loss = out.cross_entropy_loss(res)
-
+    res = tensor(ytrain[ind])
+    loss = out.NLLLoss(res)
     cat = np.argmax(out.data, axis=1)
     acc = np.sum(cat == ytrain[ind])
 

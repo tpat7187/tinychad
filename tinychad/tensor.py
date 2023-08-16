@@ -1,6 +1,5 @@
 from __future__ import annotations
 import numpy as np 
-import mypy
 import os
 import time
 from typing import List, Optional, Tuple, Union, Type
@@ -76,7 +75,8 @@ class tensor:
 
   def __repr__(self): 
     return f"op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
-
+  
+  # TODO: getitem by tensor index
   def __getitem__(self, args): 
     if isinstance(args, int): return self.slice((args))
     elif isinstance(args, tuple): return self.slice(args)
@@ -88,21 +88,22 @@ class tensor:
   def __truediv__(self,x): return self.div(x)
   def __neg__(self): return self.neg()
 
-  def __radd__(self,x): return self.add(x)
-  def __rsub__(self,x): return self.sub(x).neg()
-  def __rmul__(self,x): return self.mul(x)
-  def __rtruediv__(self,x): return self.div(x)
+  def __radd__(self,x): return self.add(x, reverse=True)
+  def __rsub__(self,x): return self.sub(x, reverse=True)
+  def __rmul__(self,x): return self.mul(x, reverse=True)
+  def __rtruediv__(self,x): return self.div(x, reverse=True)
+  def __rmatmul__(self, x): return self.dot(x, reverse=True)
 
   def __iadd__(self,x): return self.add(x)
   def __isub__(self,x): return self.sub(x)
   def __imul__(self,x): return self.mul(x)
 
   # binary ops
-  def add(self, x): return self.cast_op(ops.ADD, x) 
-  def sub(self, x): return self.cast_op(ops.SUB, x) 
-  def mul(self, x): return self.cast_op(ops.MUL, x) 
-  def div(self, x): return self.cast_op(ops.DIV, x)
-  def dot(self, x): return ops.MATMUL.apply(self, x)
+  def add(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.ADD, x, reverse)
+  def sub(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.SUB, x, reverse)
+  def mul(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
+  def div(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
+  def dot(self, x:Union[tensor, float], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
 
   # unary ops
   def relu(self): return ops.RELU.apply(self)
@@ -141,7 +142,7 @@ class tensor:
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
 
-  def reciprocal(self) -> tensor: return tensor.ones((self.shape)) / self
+  def reciprocal(self) -> tensor: return 1 / self
 
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
@@ -178,7 +179,7 @@ class tensor:
     out = res.max(axis=3).max(axis=4)
     return out
 
-  def avg_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:Optional[int]=None) -> tensor:
+  def avg_pool2d(self, kernel_size:Union[Tuple[int, ...], int], stride:Optional[int]=None) -> tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
@@ -206,13 +207,13 @@ class tensor:
     return (k, i, j)
   
   # running mean/std are tensors of size (1,1,C,1)
-  def batchnorm2d(self, weight:tensor, bias:tensor, running_mean:tensor, running_var:tensor, eps=1e-5, momentum=0) -> tensor:
+  def batchnorm2d(self, weight:tensor, bias:Optional[tensor], running_mean:tensor, running_var:tensor, eps=1e-5, momentum=0) -> tensor:
     assert len(self.shape) == 4
     N,C,H,W = self.shape
     mean = self.mean(axis=(0,2,3),keepdim=True)
     var = (self - mean).square().mean(axis=(0,2,3),keepdim=True)
     x_h = (self - mean) / (var + eps)
-    out = weight * x_h + bias if bias is not None else weight*x_h
+    out = weight * x_h + bias if bias else weight*x_h
     return out
 
   def pad_to(self, shape:Tuple[int, ...]) -> tensor:
@@ -223,7 +224,6 @@ class tensor:
       ss+=1 # cringe code please fix
     return self.pad(p_w)
 
-  # TODO: fix this with transpose instead of roll
   def cat(self, *args:tensor, axis:Optional[int]=0) -> tensor:
     assert all(len(x.shape) == len(self.shape) for x in args)
     cache, out = [self, *args], []
@@ -273,6 +273,10 @@ class tensor:
     return topo
 
   def backward(self):
+    # potential refactor: ops.backward act directly on the saved tensors and call IADD each time
+    # if we can remove the need to allocate the memory for all grads on creation it would increase training time
+    # ops.backward return ndarrays, if grad != None iadd else assign
+    # after grads are passed backward we simply set current grad back to None
     self.exec()
     assert(self.grad.shape == (1,))
     self.grad = np.ones(self.grad.shape)
@@ -282,8 +286,8 @@ class tensor:
       x.op.backward(x.grad, x.data)
       x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
 
-  def cast_op(self, fxn: ops.op, x: tensor) -> tensor:
-    x, y = self, x
+  def cast_op(self, fxn: ops.op, x: tensor, reverse:bool) -> tensor:
+    x, y = (self, x) if reverse == False else (x, self)
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: return fxn.apply(x,y)
@@ -302,15 +306,13 @@ class tensor:
     y = y.reshape(list(real.shape) + [classes])
     y = tensor(y)
     return y
-
-  def NLLLoss(self, real):
-    classes = self.shape[-1]
-    r = real.flatten().astype(np.int32)
-    y = np.zeros((r.shape[0], classes), np.float32)
-    y[range(y.shape[0]), r] = -1.0*classes
-    y = y.reshape(list(real.shape) + [classes])
-    y = tensor(y)
-    return self.mul(y).mean()
+  
+  # takes labels and logprobs (doesnt need one hot encoding)
+  def NLLLoss(self, y_true: tensor) -> tensor:
+    batch_s = self.shape[0]
+    idx_probs = self[np.arange(batch_s).astype(np.int32), y_true.data]
+    loss = (batch_s / -idx_probs.sum()).reciprocal()
+    return loss
 
   def cross_entropy(self, real, reduction = 'mean', smoothing = 0.0):
     classes = self.shape[-1]
@@ -361,8 +363,9 @@ class tensor:
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
-    self.w = tensor.randn(in_shape, out_shape)
-    self.b = tensor.randn(out_shape) if bias else None
+    bound = 1 / np.sqrt(out_shape)
+    self.w = tensor.uniform(in_shape, out_shape, lo=-bound, hi=bound)
+    self.b = tensor.uniform(out_shape, lo=-bound, hi=bound) if bias else None
 
   def __call__(self, x: tensor) -> tensor: 
     return x.dot(self.w).add(self.b)
@@ -371,9 +374,9 @@ class Conv2d:
   def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=1, stride=1, bias=True):
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
-    self.w = tensor.randn(out_channels, in_channels, *kernel_size)
+    bound = 1 / (in_channels * np.prod(kernel_size))
     self.w = tensor.kaiming_uniform(out_channels, in_channels, *kernel_size, a = np.sqrt(5))
-    self.b = tensor.randn(1,out_channels,1,1) if bias else None 
+    self.b = tensor.uniform(1,out_channels,1,1, hi=bound, lo=-bound) if bias else None 
 
   def __call__(self, x:tensor) -> tensor:
     return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
@@ -391,7 +394,7 @@ class BatchNorm2d:
 
   def __call__(self, x:tensor) -> tensor:
     if self.track:
-      self.frunning_mean = (1.0 - self.momentum) * self.running_mean + self.momentum #.mul(currentmean)
+      self.running_mean = (1.0 - self.momentum) * self.running_mean + self.momentum #.mul(currentmean)
       self.running_var = (1.0 - self.momentum) * self.running_var + self.momentum #.mul(currentvar)
 
     return x.batchnorm2d(self.w, self.b, self.running_mean, self.running_var, self.eps, self.momentum)
