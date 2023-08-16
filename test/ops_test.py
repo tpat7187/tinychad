@@ -16,14 +16,14 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     a, b = tensor(N, requires_grad = True), tensor(N, requires_grad = True)
     at, bt = torch.tensor(N, requires_grad = True), torch.tensor(N, requires_grad = True)
 
-    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean)
+    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean, tensor.logsoftmax)
     BINARY_OPS = (tensor.add, tensor.sub, tensor.div, tensor.mul, tensor.dot, tensor.cast)
     RESHAPE_OPS = (tensor.reshape, None)
     CAST_OPS = (tensor.cast, None)
 
     if tinychadfxn in UNARY_OPS:
-      x = tinychadfxn(a, axis = shapes) if axis != None else tinychadfxn(a)
-      xt = torchfxn(at, axis = shapes) if axis != None else torchfxn(at)
+      x = tinychadfxn(a, axis = axis) if axis != None else tinychadfxn(a)
+      xt = torchfxn(at, dim = axis) if axis != None else torchfxn(at)
     if tinychadfxn in BINARY_OPS:
       x = tinychadfxn(a,b)
       xt = torchfxn(at,bt)
@@ -49,7 +49,7 @@ def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None):
     a, b = tensor(N, requires_grad = True), tensor(N, requires_grad = True)
     at, bt = torch.tensor(N, requires_grad = True), torch.tensor(N, requires_grad = True)
 
-    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean)
+    UNARY_OPS = (tensor.sum, tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.mean, tensor.logsoftmax)
     BINARY_OPS = (tensor.add, tensor.sub, tensor.div, tensor.mul, tensor.dot)
     RESHAPE_OPS = (tensor.reshape, tensor.cast)
     CAST_OPS = (tensor.cast, None)
@@ -57,7 +57,7 @@ def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None):
 
     if tinychadfxn in UNARY_OPS:
       x = tinychadfxn(a, axis = axis).sum().backward() if axis != None else tinychadfxn(a).sum().backward()
-      xt = torchfxn(at, axis = axis).sum().backward() if axis != None else torchfxn(at).sum().backward()
+      xt = torchfxn(at, dim = axis).sum().backward() if axis != None else torchfxn(at).sum().backward()
     if tinychadfxn in BINARY_OPS:
       x = tinychadfxn(a,b).sum().backward()
       xt = torchfxn(at, bt).sum().backward()
@@ -111,6 +111,7 @@ def conv_pool_test_helper_fw(tinychadfxn, torchfxn, input_shape, kernel_size, bi
     xt = torchfxn(at, kernel_size=kernel_size[0], stride=kernel_size[0])
     y = x.sum().backward()
     yt = xt.sum().backward()
+
 
   try: 
     np.testing.assert_allclose(x.data, xt.detach().numpy(), atol=1e-6, rtol=1e-3)
@@ -184,6 +185,14 @@ class test_ops(unittest.TestCase):
     test_helper_bw(None, torch.max, tensor.max)
     test_helper_bw(None, torch.max, tensor.max, axis = 0)
     test_helper_bw(None, torch.max, tensor.max, axis = 1)
+
+  def test_logsoftmax_fw(self):
+    test_helper_fw(None, torch.nn.functional.log_softmax, tensor.logsoftmax, axis=0)
+    test_helper_fw(None, torch.nn.functional.log_softmax, tensor.logsoftmax, axis=1)
+
+  def test_logsoftmax_bw(self):
+    test_helper_bw(None, torch.nn.functional.log_softmax, tensor.logsoftmax, axis=0)
+    test_helper_bw(None, torch.nn.functional.log_softmax, tensor.logsoftmax, axis=1)
 
   def test_conv_fw(self): 
     conv_pool_test_helper_fw(tensor.conv2d, torch.conv2d, (1,1,26,26), (3,3), padding=0, bias=1)

@@ -159,7 +159,7 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight:tensor, bias:Optional[tensor]=None, padding=0, stride=1) -> tensor:
+  def conv2d(self, weight:tensor, bias:Optional[tensor], padding=0, stride=1) -> tensor:
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
     out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
@@ -167,8 +167,7 @@ class tensor:
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
     cols = x_padded[:, k, i, j].transpose(1,2,0).reshape(k_h * k_w * Cin, -1)
     out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
-    if bias is not None: out = out + bias
-    return out 
+    return out if bias is None else out.add(bias.reshape(1,-1,*[1]*len(weight.shape[:2])))
 
   def max_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:int=1) -> tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
@@ -288,6 +287,8 @@ class tensor:
 
   def cast_op(self, fxn: ops.op, x: tensor, reverse:bool) -> tensor:
     x, y = (self, x) if reverse == False else (x, self)
+    # if we add array to tensor the array expands a dimension, data should be in a Buffer class
+    # self.grad -> Buffer, self.data -> Buffer
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: return fxn.apply(x,y)
@@ -376,7 +377,7 @@ class Conv2d:
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     bound = 1 / (in_channels * np.prod(kernel_size))
     self.w = tensor.kaiming_uniform(out_channels, in_channels, *kernel_size, a = np.sqrt(5))
-    self.b = tensor.uniform(1,out_channels,1,1, hi=bound, lo=-bound) if bias else None 
+    self.b = tensor.uniform(out_channels, hi=bound, lo=-bound) if bias else None 
 
   def __call__(self, x:tensor) -> tensor:
     return x.conv2d(weight=self.w, bias=self.b, padding=self.padding, stride=self.stride)
