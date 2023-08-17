@@ -10,6 +10,7 @@ import torch.nn as nn
 import unittest
 
 def test_linear_helper(input_size, output_size, steps, batch_size):
+  np.random.seed(5)
   IN = np.random.randn(batch_size, input_size).astype(np.float32)
   W = np.random.randn(input_size, output_size).astype(np.float32)
   B = np.random.randn(output_size).astype(np.float32)
@@ -22,8 +23,8 @@ def test_linear_helper(input_size, output_size, steps, batch_size):
   torch_layer.weight.data = torch.tensor(W.T, requires_grad=True)
   torch_layer.bias.data = torch.tensor(B, requires_grad=True)
 
-  tinychad_optim = SGD([tc_layer.w, tc_layer.b], lr=1e-3)
-  torch_optim = torch.optim.SGD([torch_layer.weight, torch_layer.bias], lr=1e-3)
+  tinychad_optim = SGD([tc_layer.w, tc_layer.b], lr=1e-3, momentum=0.2)
+  torch_optim = torch.optim.SGD([torch_layer.weight, torch_layer.bias], lr=1e-3, momentum=0.2)
 
   torch_in = torch.tensor(IN)
   tc_in = tensor(IN)

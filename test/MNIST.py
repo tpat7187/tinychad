@@ -11,6 +11,8 @@ from tqdm import tqdm, trange
 import time
 
 xtrain, ytrain, xtest, ytest = mnist('MNIST')
+xtrain = xtrain / 255.0
+
 
 class bobnet(): 
   def __init__(self): 
@@ -26,7 +28,7 @@ class bobnet():
 
 BS= 128
 model = bobnet()
-optim = SGD([model.l1.w, model.l1.b, model.l2.w, model.l2.b], lr = 1e-3)
+optim = SGD([model.l1.w, model.l1.b, model.l2.w, model.l2.b], lr = 1e-3, momentum=0.9)
 
 def train(model, optim, xtrain, ytrain):
   for jj in (t := trange(2000)):

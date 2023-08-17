@@ -10,7 +10,7 @@ LAZY = os.getenv("LAZY")
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
     self.arg = type(self).__name__
-    self.saved = np.array(saved)
+    self.saved = saved
     self.ctx = ctx
 
   def forward(x, y): return f"forward not implemented for {self.arg}" 
@@ -42,7 +42,7 @@ class tensor:
     if isinstance(data, (int, list, float)): 
       self.data = np.array(data)
 
-    self.grad, self.requires_grad, self.op = np.zeros(self.data.shape, dtype = np.float32), requires_grad, op
+    self.grad, self.requires_grad, self.op = None, requires_grad, op
 
   @staticmethod
   def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
@@ -272,18 +272,16 @@ class tensor:
     return topo
 
   def backward(self):
-    # potential refactor: ops.backward act directly on the saved tensors and call IADD each time
-    # if we can remove the need to allocate the memory for all grads on creation it would increase training time
-    # ops.backward return ndarrays, if grad != None iadd else assign
-    # after grads are passed backward we simply set current grad back to None
     self.exec()
-    assert(self.grad.shape == (1,))
-    self.grad = np.ones(self.grad.shape)
+    assert(self.shape == (1,))
+    self.grad = np.ones(self.shape)
     for x in reversed(self.toposort()): 
-      assert x.grad.shape == x.shape, \
-        f"grad shape must match tensor shape in {x.grad.shape} != {x.shape} on {x.op.arg}"
-      x.op.backward(x.grad, x.data)
-      x.grad = np.zeros(x.grad.shape) if x.requires_grad == False else x.grad
+      grads = x.op.backward(x.grad, x.data)
+      if len(x.op.saved) == 1: 
+        grads = [grads]
+      for buf, gr in zip(x.op.saved, grads): 
+          buf.grad = gr if buf.grad is None else gr + buf.grad
+      x.grad = None if not x.requires_grad else x.grad
 
   def cast_op(self, fxn: ops.op, x: tensor, reverse:bool) -> tensor:
     x, y = (self, x) if reverse == False else (x, self)
@@ -365,7 +363,7 @@ class tensor:
 class Linear: 
   def __init__(self, in_shape, out_shape, bias=True):
     bound = 1 / np.sqrt(out_shape)
-    self.w = tensor.uniform(in_shape, out_shape, lo=-bound, hi=bound)
+    self.w = tensor.kaiming_uniform(in_shape, out_shape, a = np.sqrt(5))
     self.b = tensor.uniform(out_shape, lo=-bound, hi=bound) if bias else None
 
   def __call__(self, x: tensor) -> tensor: 

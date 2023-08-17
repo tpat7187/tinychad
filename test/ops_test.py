@@ -9,7 +9,7 @@ import unittest
 
 
 # TODO: specify input shapes, casting tests
-def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
+def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None, keepdim=None):
     np.random.seed(0)
     N = np.random.randn(5,5).astype(np.float32)
 
@@ -42,7 +42,7 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None):
     except Exception: 
       raise Exception(f"<fw pass failure> tinychad: {x.data}, pytorch{xt.detatch().numpy()}")
 
-def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None):
+def test_helper_bw(shapes, torchfxn, tinychadfxn, axis = None, keepdim=None):
     np.random.seed(0)
     N = np.random.randn(5,5).astype(np.float32)
 
@@ -148,11 +148,13 @@ class test_ops(unittest.TestCase):
     test_helper_fw(None, torch.sum, tensor.sum)
     test_helper_fw(None, torch.sum, tensor.sum, axis = 0)
     test_helper_fw(None, torch.sum, tensor.sum, axis = 1)
+    test_helper_fw(None, torch.sum, tensor.sum, axis = 1, keepdim=True)
 
   def test_sum_bw(self): 
     test_helper_bw(None, torch.sum, tensor.sum)
     test_helper_bw(None, torch.sum, tensor.sum, axis = 0)
     test_helper_bw(None, torch.sum, tensor.sum, axis = 1)
+    test_helper_bw(None, torch.sum, tensor.sum, axis = 1, keepdim=True)
 
   def test_exp_fw(self): return test_helper_fw(None, torch.exp, tensor.exp)
   def test_exp_bw(self): return test_helper_bw(None, torch.exp, tensor.exp)
@@ -170,21 +172,25 @@ class test_ops(unittest.TestCase):
     test_helper_fw(None, torch.mean, tensor.mean)
     test_helper_fw(None, torch.mean, tensor.mean, axis=0)
     test_helper_fw(None, torch.mean, tensor.mean, axis=1)
+    test_helper_fw(None, torch.mean, tensor.mean, axis=0, keepdim=True)
 
   def test_mean_bw(self):
     test_helper_bw(None, torch.mean, tensor.mean)
     test_helper_bw(None, torch.mean, tensor.mean, axis=0)
     test_helper_bw(None, torch.mean, tensor.mean, axis=1)
+    test_helper_bw(None, torch.mean, tensor.mean, axis=0, keepdim=True)
 
   def test_max_fw(self): 
     test_helper_fw(None, torch.max, tensor.max)
     test_helper_fw(None, torch.max, tensor.max, axis = 0)
     test_helper_fw(None, torch.max, tensor.max, axis = 1)
+    test_helper_fw(None, torch.max, tensor.max, axis = 1, keepdim=True)
 
   def test_max_bw(self):
     test_helper_bw(None, torch.max, tensor.max)
     test_helper_bw(None, torch.max, tensor.max, axis = 0)
     test_helper_bw(None, torch.max, tensor.max, axis = 1)
+    test_helper_bw(None, torch.max, tensor.max, axis = 1, keepdim=True)
 
   def test_logsoftmax_fw(self):
     test_helper_fw(None, torch.nn.functional.log_softmax, tensor.logsoftmax, axis=0)
@@ -215,7 +221,7 @@ class test_ops(unittest.TestCase):
     conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (3,2,24,24), (3,3))
     conv_pool_test_helper_fw(tensor.max_pool2d, torch.nn.functional.max_pool2d, (5,1,24,24), (3,3))
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
   unittest.main()
 
 
