@@ -4,6 +4,7 @@ import os
 import time
 from typing import List, Optional, Tuple, Union, Type
 
+
 DEBUG = os.getenv("DEBUG") 
 LAZY = os.getenv("LAZY")
 
@@ -375,7 +376,7 @@ class Linear:
     return x.dot(self.w).add(self.b)
 
 class Conv2d: 
-  def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=1, stride=1, bias=True):
+  def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=0, stride=1, bias=True):
     self.padding, self.stride = padding, stride
     kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
     bound = 1 / (in_channels * np.prod(kernel_size))
@@ -410,10 +411,9 @@ def castable(x: tensor, y: tensor) -> Tuple[tensor, Tuple[int, ...], tensor, int
   if x.shape != out: return x, out, y, 1
   if y.shape != out: return x, out, y, 0
 
-def is_castable(x: Tuple[int, ...], y:Tuple[int, ...]) -> bool:
+def is_castable(x:Tuple[int, ...], y:Tuple[int, ...]) -> bool:
   for a, b in zip(x[::-1], y[::-1]): 
-    if a == 1 or b == 1 or a == b:
-      pass
+    if a == 1 or b == 1 or a == b: pass
     else: 
       return False
   return True
