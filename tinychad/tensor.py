@@ -42,6 +42,8 @@ class tensor:
     if isinstance(data, (int, list, float)): 
       self.data = np.array(data)
 
+    # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
+
     self.grad, self.requires_grad, self.op = None, requires_grad, op
 
   @staticmethod
@@ -80,6 +82,9 @@ class tensor:
   def __getitem__(self, args): 
     if isinstance(args, int): return self.slice((args))
     elif isinstance(args, tuple): return self.slice(args)
+
+  def __dict__(self): 
+    return {'requires_grad' : self.requires_grad, 'shape' : self.shape}
 
   def __add__(self, x): return self.add(x)
   def __sub__(self,x): return self.sub(x)

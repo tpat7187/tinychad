@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch
 from tinychad.tensor import tensor, Linear
 from tinychad.optim import SGD
+from tinychad.helpers import get_parameters
 from mnist import mnist
 from tqdm import tqdm, trange
 import time
@@ -26,9 +27,12 @@ class bobnet():
     x = x.logsoftmax(axis=1)
     return x
 
+  def get_parameters(self): 
+    return get_parameters(self)
+
 BS= 128
 model = bobnet()
-optim = SGD([model.l1.w, model.l1.b, model.l2.w, model.l2.b], lr = 1e-3, momentum=0.9)
+optim = SGD(model.get_parameters(), lr = 1e-3, momentum=0.9)
 
 def train(model, optim, xtrain, ytrain):
   for jj in (t := trange(2000)):

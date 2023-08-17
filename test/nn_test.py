@@ -4,6 +4,7 @@ sys.path.insert(1, '../')
 
 from tinychad.tensor import tensor, Linear, Conv2d, BatchNorm2d
 from tinychad.optim import SGD
+from tinychad.helpers import get_states
 import numpy as np
 import torch
 import torch.nn as nn
@@ -23,7 +24,8 @@ def test_linear_helper(input_size, output_size, steps, batch_size):
   torch_layer.weight.data = torch.tensor(W.T, requires_grad=True)
   torch_layer.bias.data = torch.tensor(B, requires_grad=True)
 
-  tinychad_optim = SGD([tc_layer.w, tc_layer.b], lr=1e-3, momentum=0.2)
+  tc_param = get_states(tc_layer)
+  tinychad_optim = SGD(tc_param, lr=1e-3, momentum=0.2)
   torch_optim = torch.optim.SGD([torch_layer.weight, torch_layer.bias], lr=1e-3, momentum=0.2)
 
   torch_in = torch.tensor(IN)
@@ -82,6 +84,8 @@ def test_conv2d_helper(in_channels, out_channels, kernel_size, steps, batch_size
   torch_fc_layer.weight.data = torch.tensor(Wfc.T, requires_grad=True)
   torch_fc_layer.bias.data = torch.tensor(Bfc, requires_grad=True)
 
+  print(get_states(tc_layer))
+
   tinychad_optim = SGD([tc_layer.w, tc_layer.b, tc_fc_layer.w, tc_fc_layer.b], lr=1e-3)
   torch_optim = torch.optim.SGD([torch_layer.weight, torch_layer.bias, torch_fc_layer.weight, torch_fc_layer.bias], lr=1e-3)
 
@@ -125,7 +129,7 @@ class test_nn(unittest.TestCase):
   def test_linear_nn(self): return test_linear_helper(15, 10, steps=10, batch_size=10)
   def test_linear_nn(self): return test_linear_helper(28, 3, steps=100, batch_size=3)
 
-  def test_conv2d_nn(self): return test_conv2d_helper(3,5,2, padding=0, stride=2, batch_size=3, steps=5)
+  def test_conv2d_nn(self): return test_conv2d_helper(3,5,2, padding=0, stride=2, batch_size=3, steps=50)
 
 
 if __name__ == "__main__": 

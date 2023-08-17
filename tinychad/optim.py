@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Union, List
 from tinychad.tensor import tensor
+import inspect
 import numpy as np 
 
 class Optimizer(): 
@@ -11,9 +12,7 @@ class Optimizer():
 
   def zero_grad(self): 
     for param in self.params: 
-      #param.grad = np.zeros(param.shape, dtype = np.float32)
       param.grad = None
-
 
 class SGD(Optimizer): 
   def __init__(self, params:list[tensor], momentum=0, lr=1e-3):

@@ -3,6 +3,7 @@ sys.path.insert(1, '../')
 
 from tinychad.tensor import tensor, Linear, Conv2d, BatchNorm2d
 from tinychad.optim import SGD
+from tinychad.helpers import get_parameters
 import numpy as np
 
 from mnist import mnist
@@ -21,7 +22,6 @@ class convchadnet:
     self.l1 = Linear(7*7*64, 1000)
     self.l2 = Linear(1000, 10)
 
-
   def forward(self, x): 
     x = self.c1(x).relu()
     x = x.max_pool2d((2,2), stride=2)
@@ -35,10 +35,12 @@ class convchadnet:
     x = x.logsoftmax(axis=1)
     return x
 
+  def get_parameters(self): 
+    return get_parameters(self)
+
 model = convchadnet() 
 BS= 12
-params = [model.l1.w, model.l1.b, model.c1.w, model.c1.b, model.c2.w, model.c2.b, model.l2.w, model.l2.b]
-optim = SGD(params, lr = 1e-4, momentum = 0.9)
+optim = SGD(model.get_parameters(), lr = 1e-4, momentum = 0.9)
 
 def train(model, optim, xtrain, ytrain):
   for jj in (t := trange(1000)):
