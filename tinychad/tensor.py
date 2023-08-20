@@ -395,8 +395,9 @@ class BatchNorm2d:
       self.b = tensor.ones((1,num_features,1,1))
     else:
       self.w, self.b = None, None
-    self.running_mean = tensor.zeros(num_features)
-    self.running_var = tensor.zeros(num_features)
+    # the get_params is gonna grab this if we keep them as tensors
+    self.running_mean = np.zeros(num_features)
+    self.running_var = np.zeros(num_features)
 
   def __call__(self, x:tensor) -> tensor:
     if self.track:
