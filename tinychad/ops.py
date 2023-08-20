@@ -138,12 +138,10 @@ class SLICE(OP):
 
   def backward(self, out_grad, out):
     arg = self.ctx[0]
-    # accumulate gradients ; validate that this works for small slices?
     acc = np.zeros_like(self.saved[0].data)
     np.add.at(acc, *arg, out_grad)
     return acc
 
-# the ctx in the backward pass is passed in with *args, because of the new generic reshape_op
 class PAD(OP): 
   @staticmethod 
   def forward(x, args):

@@ -36,7 +36,7 @@ import tinychad.ops as ops
 # **** TENSOR CLASS ****
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
-  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = False):
+  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = None):
     if isinstance(data, (np.ndarray, LazyBuffer)): 
       self.data = data
 
@@ -165,9 +165,10 @@ class tensor:
 
   # CONV as a matmul: input -> im2col MATMUL kernel.reshape(-1,1)
   # self <- input image, weight <- kernel, bias < - bias, return conv operation
-  def conv2d(self, weight:tensor, bias:Optional[tensor], padding=0, stride=1) -> tensor:
+  def conv2d(self, weight:tensor, bias:Optional[tensor], padding:int=0, stride:Optional[int]=None) -> tensor:
     N, Cin, H, W = self.shape
     Cout, _, k_h, k_w = weight.shape
+    stride = stride if stride != None else k_h
     out_h, out_w = ((H + 2 * padding - k_h)//stride + 1), ((W + 2 * padding - k_w)//stride + 1)
     k, i, j = self.get_im2col_indices(k_h, k_w, padding=padding, stride=stride)
     x_padded = self.pad(((0,0), (0,0), (padding, padding), (padding,padding)))
@@ -175,7 +176,7 @@ class tensor:
     out = (weight.reshape(Cout,-1).dot(cols)).reshape(Cout, out_h, out_w, N).transpose(3,0,1,2)
     return out if bias is None else out.add(bias.reshape(1,-1,*[1]*len(weight.shape[:2])))
 
-  def max_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:int=1) -> tensor:
+  def max_pool2d(self, kernel_size:Union[Tuple[int,...], int], stride:int=None) -> tensor:
     kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
     stride = stride if stride != None else kernel_size[0] 
     N, Cin, H, W = self.shape
