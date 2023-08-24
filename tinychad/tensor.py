@@ -28,7 +28,7 @@ class OP:
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
-      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4))
+      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
     return out
 
 import tinychad.ops as ops
@@ -41,30 +41,30 @@ class tensor:
       self.data = data
 
     if isinstance(data, (int, list, float)): 
-      self.data = np.array(data)
+      self.data = np.array(data, dtype=np.float32)
 
     # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
 
     self.grad, self.requires_grad, self.op = None, requires_grad, op
 
   @staticmethod
-  def ones(*shape, **kwargs): return tensor(np.ones(*shape), **kwargs)
+  def ones(*shape, **kwargs): return tensor(np.ones(*shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape), **kwargs)
+  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def eye(shape, **kwargs): return tensor(np.eye(shape), **kwargs)
+  def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return tensor(np.zeros(*shape), **kwargs)
+  def zeros(*shape, **kwargs): return tensor(np.zeros(*shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi), **kwargs)
+  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32), **kwargs)
 
   @staticmethod
   def kaiming_uniform(*shape, a=0.01, **kwargs): 
-    b = np.sqrt(3.0) * np.sqrt(2.0 / (1 + a**2)) / np.sqrt(np.prod(shape[1:]))
+    b = (np.sqrt(3.0) * np.sqrt(2.0 / (1 + a**2)) / np.sqrt(np.prod(shape[1:]))).astype(np.float32)
     return tensor.uniform(*shape, hi=b, lo=-b, **kwargs)
 
   @property
@@ -105,11 +105,11 @@ class tensor:
   def __imul__(self,x): return self.mul(x)
 
   # binary ops
-  def add(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.ADD, x, reverse)
-  def sub(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.SUB, x, reverse)
-  def mul(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
-  def div(self, x:Union[tensor, float], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
-  def dot(self, x:Union[tensor, float], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
+  def add(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.ADD, x, reverse)
+  def sub(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.SUB, x, reverse)
+  def mul(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
+  def div(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
+  def dot(self, x:Union[tensor, float, int], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
 
   # unary ops
   def relu(self): return ops.RELU.apply(self)
@@ -139,7 +139,7 @@ class tensor:
 
   def mean(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
-    ss = out * (np.prod(out.shape) / np.prod(self.shape))
+    ss = out * (np.prod(out.shape) / np.prod(self.shape)).astype(np.float32)
     return ss
 
   def var(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
@@ -212,15 +212,12 @@ class tensor:
     k = np.repeat(np.arange(C), f_h * f_w).reshape(-1,1)
     return (k, i, j)
   
-  # running mean/std are tensors of size (1,1,C,1)
-  def batchnorm2d(self, weight:tensor, bias:Optional[tensor], running_mean:tensor, running_var:tensor, eps=1e-5, momentum=0) -> tensor:
+  def batchnorm2d(self, weight:tensor, bias:Optional[tensor], b_mean:tensor, b_invstd:tensor) -> tensor:
     assert len(self.shape) == 4
-    N,C,H,W = self.shape
-    mean = self.mean(axis=(0,2,3),keepdim=True)
-    var = (self - mean).square().mean(axis=(0,2,3),keepdim=True)
-    x_h = (self - mean) / (var + eps)
-    out = weight * x_h + bias if bias else weight*x_h
-    return out
+    x = (self - b_mean.reshape(1,-1,1,1))
+    if weight: x = x * weight.reshape(1,-1,1,1)
+    out = x.mul(b_invstd.reshape(1,-1,1,1))
+    return out.add(bias.reshape(1,-1,1,1)) if bias else out
 
   def pad_to(self, shape:Tuple[int, ...]) -> tensor:
     in_s, o_s, ss = self.shape, shape, 0
@@ -238,22 +235,6 @@ class tensor:
       pad_t[axis] = [self.shape[0]*j, self.shape[0]*(len(args)*1-j)]
       out.append(cache[j].pad(pad_t))
     return sum(out)
-
-  # input padded kernel and input size, output doubly blocked circulant matrix
-  def tpltz(self, input_size, kernel_size):
-    blocks, tpltz =  [], []
-    for j in  range(self.shape[0]):
-      r = self[j,:].reshape(-1,1)
-      rl = [] 
-      for j in range(r.shape[0]-kernel_size[0]):
-        rl.append(r.roll(j+1, axis=0))
-      blocks.append(r.cat(*rl, axis=1))
-    blocks = blocks[::-1]
-    block = tensor.cat(*[_ for _ in blocks], axis=0)
-    for _ in range(input_size[0]):
-      tpltz.append(block.roll(_*self.shape[1], axis=0))
-    out = tensor.cat(*[_ for _ in tpltz], axis=1)
-    return out
 
   def unsqueeze(self, axis: int) -> tensor:
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])
@@ -281,7 +262,7 @@ class tensor:
   def backward(self):
     self.exec()
     assert(self.shape == (1,))
-    self.grad = np.ones(self.shape)
+    self.grad = np.ones(self.shape, dtype=np.float32)
     for x in reversed(self.toposort()): 
       grads = x.op.backward(x.grad, x.data)
       if len(x.op.saved) == 1: 
@@ -391,8 +372,8 @@ class BatchNorm2d:
   def __init__(self, num_features, affine=True, momentum=0, track=False, eps=1e-5):
     self.momentum, self.eps, self.track = momentum, eps, track
     if affine:
-      self.w = tensor.ones((1,num_features,1,1))
-      self.b = tensor.ones((1,num_features,1,1))
+      self.w = tensor.ones((num_features))
+      self.b = tensor.zeros((num_features))
     else:
       self.w, self.b = None, None
     # the get_params is gonna grab this if we keep them as tensors
@@ -400,11 +381,16 @@ class BatchNorm2d:
     self.running_var = np.zeros(num_features)
 
   def __call__(self, x:tensor) -> tensor:
+    b_mean = x.mean(axis=(0,2,3))
+    y = (x - b_mean.reshape(1,-1,1,1))
+    b_var = (y*y).mean(axis=(0,2,3))
+    b_invstd = b_var.add(self.eps).sqrt()
+
     if self.track:
       self.running_mean = (1.0 - self.momentum) * self.running_mean + self.momentum #.mul(currentmean)
       self.running_var = (1.0 - self.momentum) * self.running_var + self.momentum #.mul(currentvar)
 
-    return x.batchnorm2d(self.w, self.b, self.running_mean, self.running_var, self.eps, self.momentum)
+    return x.batchnorm2d(self.w, self.b, b_mean, b_invstd)
 
 # returns cast, target, and buffer
 def castable(x: tensor, y: tensor) -> Tuple[tensor, Tuple[int, ...], tensor, int]:
