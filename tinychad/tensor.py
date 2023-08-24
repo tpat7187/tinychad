@@ -51,7 +51,7 @@ class tensor:
   def ones(*shape, **kwargs): return tensor(np.ones(*shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape, dtype=np.float32), **kwargs)
+  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
 
   @staticmethod
   def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
@@ -409,6 +409,8 @@ def is_castable(x:Tuple[int, ...], y:Tuple[int, ...]) -> bool:
 class LazyBuffer: 
   def __init__(self, shape:Tuple[int, ...], op:ops.OP):
     self.shape, self.op = shape, op
+
+def typecast(self, dtype): return self.data.astype(dtype)
 
 class ViewTracker: 
   @classmethod

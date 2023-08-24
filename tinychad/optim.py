@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union, List
 from tinychad.tensor import tensor
-import inspect
+import time
 import numpy as np 
 
 class Optimizer(): 
@@ -18,7 +18,7 @@ class SGD(Optimizer):
   def __init__(self, params:list[tensor], momentum=0, lr=1e-3):
     super().__init__(params, lr)
     self.lr, self.momentum = lr, momentum
-    self.v = [np.zeros(i.shape) for i in self.params] if self.momentum else []
+    self.v = [np.zeros(i.shape, dtype=np.float32) for i in self.params] if self.momentum else []
 
   def step(self): 
     for i, param in enumerate(self.params):

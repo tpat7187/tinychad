@@ -106,7 +106,7 @@ class MAX(OP):
     if kd is False:
       out = np.expand_dims(out, axis=axis) if axis is not None else out
       out_grad = np.expand_dims(out_grad, axis=axis) if axis is not None else out_grad
-    tt = 1.0 - (self.saved[0].data < np.broadcast_to(out, self.saved[0].shape))
+    tt = 1.0 - (self.saved[0].data < np.broadcast_to(out, self.saved[0].shape)).astype(np.float32)
     exp = np.broadcast_to(tt.sum(axis=axis,keepdims=True), self.saved[0].shape)
     out = (tt / exp) * np.broadcast_to(out_grad, self.saved[0].shape)
     return out
