@@ -316,6 +316,7 @@ class tensor:
     return self.logsoftmax(axis=1).mul(y).sum(axis=1,keepdim=True).mean()
   
   # contain bufferID, bufferSHAPE, savedBuffers if not None
+  # TODO: make the output list toposorted
   def get_buffers(self) -> Tuple: 
     assert LAZY, "cannot get buffers without lazy evaluation enabled"
     cache = set()
@@ -323,10 +324,12 @@ class tensor:
       if id(s) not in cache:
         if type(s.op) != ops.LOAD: 
           _saved = tuple([hex(id(f)) for f in s.op.saved])
-          _reg = (hex(id(s)), s.shape, type(s.op)) + _saved
+          if isinstance(s.data, LazyBuffer): 
+            s.data = np.zeros(s.shape, dtype=np.float32)
+          _reg = (hex(id(s)), s.shape, type(s.op), s) + _saved
           cache.add(_reg)
         else:
-          cache.add((hex(id(s)), s.shape, type(s.op)))
+          cache.add((hex(id(s)), s.shape, type(s.op), s))
         if type(s.op) != ops.LOAD: 
           for child in s.op.saved:
             _get_buffers(child)
@@ -338,10 +341,7 @@ class tensor:
     _bufs = [] 
     for l in cache: 
       _bufs.append(tensor.zeros(l[1]))
-
     return _bufs
-
-
   
   # need to find way to return function arguments and preserve cache ordering
   # for example 

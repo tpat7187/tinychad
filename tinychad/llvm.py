@@ -7,12 +7,12 @@ import ctypes
 
 # this is just a lazy buffer in desguise
 void_t = ir.VoidType()
-arr_t = ir.PointerType(ir.DoubleType())
+arr_t = ir.PointerType(ir.FloatType())
 
 class LLVMCodegen: 
   def __init__(self, _cache): 
-    _bufs = [np.zeros(l[1], dtype=np.float32) for l in _cache]
-
+    # LOAD actual data from buffers, initialize all other buffers to zeros
+    _bufs = [j[3].data for j in _cache]
     self._cache, self.mod, self._bufs = _cache, ir.Module(), _bufs
     self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))])
     self.main = ir.Function(self.mod, self.fun_t, name = 'main')
@@ -27,6 +27,8 @@ class LLVMCodegen:
     self.args = self.main.args
     self.op_map = {ops.ADD : ir.IRBuilder.fadd, ops.SUB : ir.IRBuilder.fsub, ops.MUL : ir.IRBuilder.fmul}
 
+    self._bufs_ptr = [j.ctypes.data_as(ctypes.c_void_p) for j in self._bufs]
+
   def parse_cache(self): 
     s, tt = [j[0] for j in self._cache], {}
     for j in range(len(self._cache)):
@@ -35,7 +37,7 @@ class LLVMCodegen:
       if j[2] != ops.LOAD:
         # this is temporary will only work for binaryops
         output_arg = tt[j[0]]
-        input_args = [tt[j[3]], tt[j[4]]]
+        input_args = [tt[j[4]], tt[j[5]]]
         self.elementwise_op(j[2], j[1], output_arg, input_args)
 
   # unary + binary sans MATMUL
