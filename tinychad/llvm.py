@@ -28,12 +28,18 @@ class LLVMCodegen:
     self.op_map = {ops.ADD : ir.IRBuilder.fadd, ops.SUB : ir.IRBuilder.fsub, ops.MUL : ir.IRBuilder.fmul}
 
   def parse_cache(self): 
+    s, tt = [j[0] for j in self._cache], {}
+    for j in range(len(self._cache)):
+      tt[s[j]] = self.args[j]
     for j in self._cache: 
       if j[2] != ops.LOAD:
-        self.elementwise_op(j[2], j[1])
+        # this is temporary will only work for binaryops
+        output_arg = tt[j[0]]
+        input_args = [tt[j[3]], tt[j[4]]]
+        self.elementwise_op(j[2], j[1], output_arg, input_args)
 
   # unary + binary sans MATMUL
-  def elementwise_op(self, op, shapes):
+  def elementwise_op(self, op, shapes, output_arg, input_args):
     # generate new function
     addi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t])
     addi = ir.Function(self.mod, addi_type, name = f"{str(op.__name__)}_{shapes[0]}")
@@ -55,8 +61,7 @@ class LLVMCodegen:
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
-    print(addi)
-
+    self.main_builder.call(addi, (*input_args, output_arg))
 
   # sum/max
   def shape_op(self, op, axis, keedim):
