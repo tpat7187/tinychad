@@ -3,6 +3,7 @@ import llvmlite.ir as ir
 import llvmlite.binding as llvm
 from typing import Union, Tuple, List, Optional
 import tinychad.ops as ops
+from ctypes import c_void_p, CFUNCTYPE
 import ctypes
 
 # this is just a lazy buffer in desguise
@@ -11,7 +12,6 @@ arr_t = ir.PointerType(ir.FloatType())
 
 class LLVMCodegen: 
   def __init__(self, _cache): 
-    # LOAD actual data from buffers, initialize all other buffers to zeros
     _bufs = [j[3].data for j in _cache]
     self._cache, self.mod, self._bufs = _cache, ir.Module(), _bufs
     self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))])
@@ -27,7 +27,7 @@ class LLVMCodegen:
     self.args = self.main.args
     self.op_map = {ops.ADD : ir.IRBuilder.fadd, ops.SUB : ir.IRBuilder.fsub, ops.MUL : ir.IRBuilder.fmul}
 
-    self._bufs_ptr = [j.ctypes.data_as(ctypes.c_void_p) for j in self._bufs]
+    self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
 
   def parse_cache(self): 
     s, tt = [j[0] for j in self._cache], {}
@@ -39,6 +39,32 @@ class LLVMCodegen:
         output_arg = tt[j[0]]
         input_args = [tt[j[4]], tt[j[5]]]
         self.elementwise_op(j[2], j[1], output_arg, input_args)
+
+  def compile(self): 
+    self.parse_cache()
+    self.main_builder.branch(self.out_block)
+    input_ir = self.mod
+    llvm.initialize()
+    llvm.initialize_native_target()
+    llvm.initialize_native_asmprinter()
+    llvm_ir = str(input_ir)
+
+    target = llvm.Target.from_default_triple()
+    target_machine = target.create_target_machine()
+    backing_mod = llvm.parse_assembly("") 
+    engine = llvm.create_mcjit_compiler(backing_mod, target_machine)
+    mod = llvm.parse_assembly(llvm_ir)
+    engine.add_module(mod)
+    engine.finalize_object()
+    engine.run_static_constructors()
+    main_ptr = engine.get_function_address("main")
+    cfunc = CFUNCTYPE(None, *[c_void_p for j in self._cache])(main_ptr)
+    cfunc(*self._bufs_ptr)
+
+    print(self._bufs)
+
+
+
 
   # unary + binary sans MATMUL
   def elementwise_op(self, op, shapes, output_arg, input_args):
