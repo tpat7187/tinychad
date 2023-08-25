@@ -314,16 +314,50 @@ class tensor:
     if reduction=='sum': 
       return -self.logsoftmax(axis=1).mul(y).sum(axis=1).sum()
     return self.logsoftmax(axis=1).mul(y).sum(axis=1,keepdim=True).mean()
-
+  
+  # contain bufferID, bufferSHAPE, savedBuffers if not None
   def get_buffers(self) -> Tuple: 
     assert LAZY, "cannot get buffers without lazy evaluation enabled"
     cache = set()
     def _get_buffers(s):
-      if id(s) not in cache and type(s.op) != ops.LOAD:
-        cache.add((hex(id(s)), s.shape, type(s.op)))
-        [_get_buffers(child) for child in s.op.saved if type(s.op) != ops.LOAD]
+      if id(s) not in cache:
+        if type(s.op) != ops.LOAD: 
+          _saved = tuple([hex(id(f)) for f in s.op.saved])
+          _reg = (hex(id(s)), s.shape, type(s.op)) + _saved
+          cache.add(_reg)
+        else:
+          cache.add((hex(id(s)), s.shape, type(s.op)))
+        if type(s.op) != ops.LOAD: 
+          for child in s.op.saved:
+            _get_buffers(child)
     _get_buffers(self)
     return cache
+
+  @staticmethod 
+  def cache_to_buffers(cache): 
+    _bufs = [] 
+    for l in cache: 
+      _bufs.append(tensor.zeros(l[1]))
+
+    return _bufs
+
+
+  
+  # need to find way to return function arguments and preserve cache ordering
+  # for example 
+  # {('0x7fd484fe6d00', (25, 25), <class 'tinychad.ops.LOAD'>), ('0x7fd4850b1000', (25, 25), <class 'tinychad.ops.MATMUL'>, '0x7fd484fe6d00', '0x7fd4853c3e80'), 
+  #  ('0x7fd4fe3b6940', (25, 25), <class 'tinychad.ops.CAST'>, '0x7fd4852a15c0'), ('0x7fd4852a15c0', (1,), <class 'tinychad.ops.LOAD'>), ('0x7fd4853c3e80', (25, 25), <class 'tinychad.ops.LOAD'>), 
+  #  ('0x7fd51ca97140', (25, 25), <class 'tinychad.ops.ADD'>, '0x7fd4850b1000', '0x7fd4fe3b6940')}
+  # -> void net(&L1, &L2, &L3, &L4, &L5, &L6) { 
+  #      mm_25_25(&L1, &L2, &L3); computes matrix multiplication between L1, L2 LOADs and stores in L3 
+  #      c_1_25(&L4, &L5); loads (1,) and broadcasts into (25,25) and stores in L5
+  #      add_25_25(&L3, &L5, &L6); computes elementwise addition with L3, L5 and stores in L6
+  #      return 0; 
+  # }
+  #  !! LLVM backend will generate mm_25_25, c_1_25 ect., we just need to make sure we pass it the correct buffers !!
+  # ideally all we need is buffers + ops to generate the IR, the get_buffers should present this in such a way where we can simply iterate through the cache
+  # and create all the numpy buffers -> pass them in as void pointers
+  # whats important is that we preserve the ordering of the cache
 
   def exec(self) -> tensor:
     if self.realized(): return self
