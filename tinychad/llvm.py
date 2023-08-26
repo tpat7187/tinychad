@@ -25,7 +25,21 @@ class LLVMCodegen:
     self.out_builder.ret_void()
 
     self.args = self.main.args
-    self.op_map = {ops.ADD : ir.IRBuilder.fadd, ops.SUB : ir.IRBuilder.fsub, ops.MUL : ir.IRBuilder.fmul}
+    # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
+    # supposedly there is an intrinsic function already for matmuls
+    self.op_map = {
+      ops.ADD : lambda builder, x, y: builder.fadd(x,y),
+      ops.SUB : lambda builder, x, y: builder.fsub(x,y),
+      ops.MUL : lambda builder, x, y: builder.fmul(x,y),
+      ops.DIV : lambda builder, x, y: builder.fdiv(x,y),
+
+      ops.NEG: lambda builder, x: builder.fmul(x, ir.Constant(ir.FloatType(), -1)),
+      ops.EXP: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
+      ops.LOG: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
+      ops.SQRT: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.sqrt', [ir.FloatType()]), [x]),
+      ops.RELU: lambda builder, x: builder.select(builder.fcmp_unordered(">", x, ir.Constant(ir.FloatType(), 0)), x, ir.Constant(ir.FloatType(), 0))
+    }
+      
 
     self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
 
@@ -35,9 +49,8 @@ class LLVMCodegen:
       tt[s[j]] = self.args[j]
     for j in self._cache: 
       if j[2] != ops.LOAD:
-        # this is temporary will only work for binaryops
+        input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
         output_arg = tt[j[0]]
-        input_args = [tt[j[4]], tt[j[5]]]
         self.elementwise_op(j[2], j[1], output_arg, input_args)
 
   def compile(self): 
@@ -61,35 +74,36 @@ class LLVMCodegen:
     cfunc = CFUNCTYPE(None, *[c_void_p for j in self._cache])(main_ptr)
     cfunc(*self._bufs_ptr)
 
-    print(self._bufs)
-
-
-
-
   # unary + binary sans MATMUL
   def elementwise_op(self, op, shapes, output_arg, input_args):
     # generate new function
-    addi_type = ir.FunctionType(void_t, [arr_t, arr_t, arr_t])
-    addi = ir.Function(self.mod, addi_type, name = f"{str(op.__name__)}_{shapes[0]}")
+    num_in_buffers = len(input_args)
+    fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
+    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
     llvm_op = self.op_map[op]
-    inp_block = addi.append_basic_block(name = 'entry')
-    loop_block = addi.append_basic_block(name = 'loop')
-    out_block = addi.append_basic_block(name = 'out')
+    inp_block = fxn.append_basic_block(name = 'entry')
+    loop_block = fxn.append_basic_block(name = 'loop')
+    out_block = fxn.append_basic_block(name = 'out')
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
     out_builder.ret_void()
     s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes))
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
-    a, b, c = addi.args
-    av = loop_builder.load(loop_builder.gep(a, [idx]))
-    bv = loop_builder.load(loop_builder.gep(b, [idx]))
-    c_ptr = loop_builder.gep(c, [idx])
-    loop_builder.store(llvm_op(loop_builder, av, bv), c_ptr)
+    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
+    if num_in_buffers > 1: 
+      bv = loop_builder.load(loop_builder.gep(fxn.args[1], [idx])) 
+      inputs = tuple((av, bv))
+    else: 
+      inputs = tuple((av,))
+
+
+    out_ptr = loop_builder.gep(fxn.args[num_in_buffers], [idx])
+    loop_builder.store(llvm_op(loop_builder, *inputs), out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
-    self.main_builder.call(addi, (*input_args, output_arg))
+    self.main_builder.call(fxn, (*input_args, output_arg))
 
   # sum/max
   def shape_op(self, op, axis, keedim):
