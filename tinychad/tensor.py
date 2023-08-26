@@ -317,31 +317,21 @@ class tensor:
   
   # contain bufferID, bufferSHAPE, savedBuffers if not None
   # TODO: make the output list toposorted
+  # list of LOADS + toposorted BUFFERS
   def get_buffers(self) -> Tuple: 
     assert LAZY, "cannot get buffers without lazy evaluation enabled"
-    cache = set()
-    def _get_buffers(s):
-      if id(s) not in cache:
-        if type(s.op) != ops.LOAD: 
-          _saved = tuple([hex(id(f)) for f in s.op.saved])
-          if isinstance(s.data, LazyBuffer): 
-            s.data = np.zeros(s.shape, dtype=np.float32)
-          _reg = (hex(id(s)), s.shape, type(s.op), s) + _saved
-          cache.add(_reg)
-        else:
-          cache.add((hex(id(s)), s.shape, type(s.op), s))
-        if type(s.op) != ops.LOAD: 
-          for child in s.op.saved:
-            _get_buffers(child)
-    _get_buffers(self)
-    return cache
+    cache, loads = [], []
+    for s in self.toposort():
+      for i in s.op.saved:
+        if type(i.op) == ops.LOAD:
+          loads.append((hex(id(i)), i.shape, type(i.op), i))
+      _saved = tuple([hex(id(f)) for f in s.op.saved])
+      if isinstance(s.data, LazyBuffer): 
+        s.data = np.zeros(s.shape, dtype=np.float32)
+      _reg = (hex(id(s)), s.shape, type(s.op), s) + _saved
+      cache.append(_reg)
+    return loads + cache
 
-  @staticmethod 
-  def cache_to_buffers(cache): 
-    _bufs = [] 
-    for l in cache: 
-      _bufs.append(tensor.zeros(l[1]))
-    return _bufs
   
   # need to find way to return function arguments and preserve cache ordering
   # for example 
