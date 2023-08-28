@@ -24,6 +24,8 @@ class LLVMCodegen:
     self.out_builder.ret_void()
 
     self.args = self.main.args
+    self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
+    self.generated_fxns = set()
     # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
     # supposedly there is an intrinsic function already for matmuls
     self.op_map = {
@@ -40,9 +42,13 @@ class LLVMCodegen:
     }
       
 
-    self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
-
   def parse_cache(self): 
+
+    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
+    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
+    ShapeOPS = [ops.SUM, ops.MAX]
+    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
+
     s, tt = [j[0] for j in self._cache], {}
     for j in range(len(self._cache)):
       tt[s[j]] = self.args[j]
@@ -50,7 +56,11 @@ class LLVMCodegen:
       if j[2] != ops.LOAD:
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
         output_arg = tt[j[0]]
-        self.elementwise_op(j[2], j[1], output_arg, input_args)
+        if j[2] in (BinaryOPS + UnaryOPS):
+          self.elementwise_op(j[2], j[1], output_arg, input_args)
+        if j[2] in ShapeOPS:
+          args = j[3].op.ctx
+          self.shape_op(j[2], j[3].op.saved[0].shape, output_arg, input_args, args)
 
   def compile(self): 
     self.parse_cache()
@@ -96,12 +106,43 @@ class LLVMCodegen:
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
-
+    self.generated_fxns.add(fxn.name)
     self.main_builder.call(fxn, (*input_args, output_arg))
 
-  # sum/max
-  def shape_op(self, op, axis, keedim):
-    pass
+  # sum/max, axis is a accumulate with a stride
+  # how to re-write with blocks to not have race condition
+  # each block is a idx on the output buffer
+  # each block is a pass in the loop
+  # each pass will read all elements in the block, sum them, and store in the idx of the output
+  # [1,2,3,4,5,6] (2,3) axis = 0 -> [1+4], [2+5], [3+6], 3 blocks 2 elements each stride=3, s_ptr=1 e_ptr=3
+  # [1,2,3,4,5,6] (2,3) axis = 1 -> [1+2+3], [4+5+6], 2 blocks 3 elements each stride=1, s_ptr=1 e_ptr =2
+  # idx 0 -> 2 (shape[axis])
+
+  def shape_op(self, op, shapes, output_arg, input_args, args):
+    # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
+    stride = 3
+    blocks = ir.Constant(ir.IntType(32), shapes[1])
+    fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
+    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
+    inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
+    inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
+    inp_builder.branch(loop_block)
+    out_builder.ret_void()
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 3)
+
+    idx = loop_builder.phi(ir.IntType(32))
+    idx.add_incoming(s_ptr, inp_block)
+    out = loop_builder.load(loop_builder.gep(fxn.args[1], [idx], inbounds=True))
+    out_ptr = loop_builder.gep(fxn.args[1], [idx])
+    for x in range(shapes[1]):
+      j = ir.Constant(ir.IntType(32), x*stride)
+      av = loop_builder.load(loop_builder.gep(fxn.args[0], [j], inbounds=True))
+      loop_builder.store(ir.IRBuilder.fadd(loop_builder, av, out), out_ptr)
+    
+    idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
+    idx.add_incoming(idx_n, loop_block)
+    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
+    self.main_builder.call(fxn, (*input_args, output_arg))
 
   # slice, pad, transpose, reshape, cast
   def _reshape(self, args):
