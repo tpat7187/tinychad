@@ -120,25 +120,25 @@ class LLVMCodegen:
 
   def shape_op(self, op, shapes, output_arg, input_args, args):
     # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-    stride = 3
-    blocks = ir.Constant(ir.IntType(32), shapes[1])
+    _blocks = shapes[1] if args[0] != None else 1
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 3)
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), _blocks)
 
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
-    out = loop_builder.load(loop_builder.gep(fxn.args[1], [idx], inbounds=True))
-    out_ptr = loop_builder.gep(fxn.args[1], [idx])
-    for x in range(shapes[1]):
-      j = ir.Constant(ir.IntType(32), x*stride)
-      av = loop_builder.load(loop_builder.gep(fxn.args[0], [j], inbounds=True))
+    out_ptr = loop_builder.gep(fxn.args[1], [idx]) 
+
+    for x in range(np.prod(shapes) // _blocks):
+      something = loop_builder.add(idx, ir.Constant(ir.IntType(32), x*_blocks))
+      av = loop_builder.load(loop_builder.gep(fxn.args[0], [something]))
+      out = loop_builder.load(loop_builder.gep(fxn.args[1], [idx])) 
       loop_builder.store(ir.IRBuilder.fadd(loop_builder, av, out), out_ptr)
-    
+
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
