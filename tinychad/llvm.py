@@ -110,17 +110,22 @@ class LLVMCodegen:
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   # sum/max, axis is a accumulate with a stride
-  # how to re-write with blocks to not have race condition
-  # each block is a idx on the output buffer
-  # each block is a pass in the loop
-  # each pass will read all elements in the block, sum them, and store in the idx of the output
-  # [1,2,3,4,5,6] (2,3) axis = 0 -> [1+4], [2+5], [3+6], 3 blocks 2 elements each stride=3, s_ptr=1 e_ptr=3
-  # [1,2,3,4,5,6] (2,3) axis = 1 -> [1+2+3], [4+5+6], 2 blocks 3 elements each stride=1, s_ptr=1 e_ptr =2
-  # idx 0 -> 2 (shape[axis])
+  # [1,2,3,4,5,6] (2,3) axis = 0 -> [1+4], [2+5], [3+6], 3 blocks 2 elements
+  # [1,2,3,4,5,6] (2,3) axis = 1 -> [1+2+3], [4+5+6], 2 blocks 3 elements
+  # TODO: dim > 2 doesnt work, it may just be a striding thing
 
   def shape_op(self, op, shapes, output_arg, input_args, args):
     # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-    _blocks = shapes[1] if args[0] != None else 1
+    shapes = list(shapes)[::-1]
+    _blocks = shapes[args[0]] if args[0] != None else 1
+    if args[0] != None:
+      stride = [1]
+      for s in reversed(shapes[:-1]): 
+        stride.insert(0, stride[0]*s)
+      stride = stride[args[0]]
+    else: 
+      stride=1
+
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
@@ -131,13 +136,24 @@ class LLVMCodegen:
 
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
-    out_ptr = loop_builder.gep(fxn.args[1], [idx]) 
-
+    indx, cache = idx, []
     for x in range(np.prod(shapes) // _blocks):
-      something = loop_builder.add(idx, ir.Constant(ir.IntType(32), x*_blocks))
-      av = loop_builder.load(loop_builder.gep(fxn.args[0], [something]))
-      out = loop_builder.load(loop_builder.gep(fxn.args[1], [idx])) 
-      loop_builder.store(ir.IRBuilder.fadd(loop_builder, av, out), out_ptr)
+      if stride == 1:
+        indx = loop_builder.mul(idx, ir.Constant(ir.IntType(32), np.prod(shapes)//_blocks))
+        indx = loop_builder.add(indx, ir.Constant(ir.IntType(32), x))
+        av = loop_builder.load(loop_builder.gep(fxn.args[0], [indx]))
+      else: 
+        av = loop_builder.load(loop_builder.gep(fxn.args[0], [indx]))
+        indx = loop_builder.add(indx, ir.Constant(ir.IntType(32), stride))
+      cache.append(av)
+
+    out = cache[0]
+    out = loop_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
+    for i in range(1, len(cache)):
+      out = loop_builder.fadd(cache[i], out)
+
+    out_ptr = loop_builder.gep(fxn.args[1], [idx]) 
+    loop_builder.store(out, out_ptr)
 
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
