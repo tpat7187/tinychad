@@ -38,7 +38,10 @@ class LLVMCodegen:
       ops.EXP: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
       ops.LOG: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
       ops.SQRT: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.sqrt', [ir.FloatType()]), [x]),
-      ops.RELU: lambda builder, x: builder.select(builder.fcmp_unordered(">", x, ir.Constant(ir.FloatType(), 0)), x, ir.Constant(ir.FloatType(), 0))
+      ops.RELU: lambda builder, x: builder.select(builder.fcmp_unordered(">", x, ir.Constant(ir.FloatType(), 0)), x, ir.Constant(ir.FloatType(), 0)),
+
+      ops.SUM: lambda builder, x, y: builder.fadd(x,y),
+      ops.MAX: lambda builder, x, y: builder.select(builder.fcmp_unordered(">", x, y), x, y)
     }
       
 
@@ -150,7 +153,7 @@ class LLVMCodegen:
     out = cache[0]
     out = loop_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
     for i in range(1, len(cache)):
-      out = loop_builder.fadd(cache[i], out)
+      out = self.op_map[op](loop_builder, cache[i], out)
 
     out_ptr = loop_builder.gep(fxn.args[1], [idx]) 
     loop_builder.store(out, out_ptr)
