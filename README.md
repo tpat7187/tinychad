@@ -9,11 +9,10 @@ goals:
 TODO: 
   * computation graph
   * LLVM/MLIR backend
-    * test llvmlite/ctypes with lazybuffers
-    * MLIR/LLVM kelido toy-dialect
+    * all primitive ops generating LLVM
+    * MNIST IN THE WEB
   * update training/testing
-    * match torch on NLLL and CrossEntropyLoss
-    * convnet for MNIST
+    * batchnorm2d passing tests
   * state dict for transfer learning
 
 ## how to chad

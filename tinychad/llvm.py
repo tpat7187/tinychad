@@ -63,7 +63,8 @@ class LLVMCodegen:
           self.elementwise_op(j[2], j[1], output_arg, input_args)
         if j[2] in ShapeOPS:
           args = j[3].op.ctx
-          self.shape_op(j[2], j[3].op.saved[0].shape, output_arg, input_args, args)
+          # pass in entire output buffer
+          self.shape_op(j[2], j[3], output_arg, input_args, args)
 
   def compile(self): 
     self.parse_cache()
@@ -115,12 +116,32 @@ class LLVMCodegen:
   # sum/max, axis is a accumulate with a stride
   # [1,2,3,4,5,6] (2,3) axis = 0 -> [1+4], [2+5], [3+6], 3 blocks 2 elements
   # [1,2,3,4,5,6] (2,3) axis = 1 -> [1+2+3], [4+5+6], 2 blocks 3 elements
-  # TODO: dim > 2 doesnt work, it may just be a striding thing
+  # if the stride changes between blocks we need to introduce another loop
+  # EG:  [0,1,2,3,4,5,6,7] axis=0 -> [0,4]->(1)->[1,5]->(1)->[2,6]->(1)->[3,7] stride=4, block stride=1
+  # EG2: [0,1,2,3,4,5,6,7] axis=1 -> [0,2]->(1)->[1,3]->(3)->[4,6]->(1)->[5,7] stride=2, block stride=(1,3)
+  # EG3: [0,1,2,3,4,5,6,7] axis=2 -> [0,1]->(2)->[2,3]->(2)->[4,5]->(2)->[6,7] stride=1, block stride=2
+  # loop 1: idx0, idx0*3 
+  # loop 2: idx0, idx0+stride
+
+  # if stride AND block_stride > 1 NEED new loop
+  @staticmethod
+  def get_strides(shape, axis):
+    stride = 1
+    for i in range(axis+1, len(shape)):
+        stride *= shape[i]
+    if axis == 0: block_stride = 1
+    elif axis == len(shape) - 1: block_stride = stride * shape[axis]
+    else: block_stride = stride * shape[axis]
+    return stride, block_stride
+
 
   def shape_op(self, op, shapes, output_arg, input_args, args):
     # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-    shapes = list(shapes)[::-1]
-    _blocks = shapes[args[0]] if args[0] != None else 1
+    in_shape = shapes.op.saved[0].shape
+    out_shape = shapes.shape
+
+    shapes = list(in_shape)[::-1]
+    _blocks = np.sum(out_shape)
     if args[0] != None:
       stride = [1]
       for s in reversed(shapes[:-1]): 
@@ -140,6 +161,7 @@ class LLVMCodegen:
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
     indx, cache = idx, []
+    print(_blocks, stride)
     for x in range(np.prod(shapes) // _blocks):
       if stride == 1:
         indx = loop_builder.mul(idx, ir.Constant(ir.IntType(32), np.prod(shapes)//_blocks))
@@ -163,7 +185,19 @@ class LLVMCodegen:
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
     self.main_builder.call(fxn, (*input_args, output_arg))
 
-  # slice, pad, transpose, reshape, cast
+  def _transpose(self, args):
+    pass
+
+  def _slice(self, args):
+    pass
+
+  def _cast(self, args):
+    pass
+
+  def _pad(self, args):
+    pass
+
+  # this should just be a simple copy, the content of the array doesnt change
   def _reshape(self, args):
     pass
   

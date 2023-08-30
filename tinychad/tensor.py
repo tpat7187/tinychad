@@ -21,7 +21,7 @@ class OP:
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if LAZY and lazy == False:
       lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
-      out = tensor(LazyBuffer(lazyshape, self), op = self(saved = [*x], ctx = list(kwargs.values())))
+      out = tensor(LazyBuffer(lazyshape, self, children= [j.data for j in x]), op = self(saved = [*x], ctx = list(kwargs.values())))
       return out
     if DEBUG: st = time.monotonic()
     out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -140,6 +140,7 @@ class tensor:
   def mean(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     ss = out * (np.prod(out.shape) / np.prod(self.shape)).astype(np.float32)
+    print(out.data)
     return ss
 
   def var(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
@@ -431,8 +432,18 @@ def is_castable(x:Tuple[int, ...], y:Tuple[int, ...]) -> bool:
   return True
 
 class LazyBuffer: 
-  def __init__(self, shape:Tuple[int, ...], op:ops.OP):
+  def __init__(self, shape:Tuple[int, ...], op:ops.OP, children=None):
     self.shape, self.op = shape, op
+    self.children = children
+
+# LLVM Buffer needs input and output shapes and zero intitalized tensors
+class LLVMBuffer: 
+  def __init__(self, shape:Tuple[int, ...], op:ops.OP, children=None): 
+    self.op = op
+    self.out_shape = None
+    self.data = np.zeros(self.in_shape)
+    self.children = children
+
 
 def typecast(self, dtype): return self.data.astype(dtype)
 
