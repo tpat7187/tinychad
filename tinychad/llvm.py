@@ -123,72 +123,86 @@ class LLVMCodegen:
   # EG3: [0,1,2,3,4,5,6,7] axis=2 -> [0,1]->(2)->[2,3]->(2)->[4,5]->(2)->[6,7] stride=1, block stride=2
   # loop 1: idx0, idx0*3 
   # loop 2: idx0, idx0+stride
+  # IF 0 < axis < len(in_shape) we are going to have a block_stride > 1
 
   # if stride AND block_stride > 1 NEED new loop
+  # stride and block_stride function
+
+
   @staticmethod
   def get_strides(shape, axis):
     stride = 1
     for i in range(axis+1, len(shape)):
         stride *= shape[i]
-    if axis == 0: block_stride = 1
-    elif axis == len(shape) - 1: block_stride = stride * shape[axis]
-    else: block_stride = stride * shape[axis]
-    return stride, block_stride
+    return stride
 
+  @staticmethod 
+  def get_block_stride(shape, axis, stride):
+    return stride * shape[axis]
 
+  # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
   def shape_op(self, op, shapes, output_arg, input_args, args):
-    # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-    in_shape = shapes.op.saved[0].shape
-    out_shape = shapes.shape
-
-    shapes = list(in_shape)[::-1]
-    _blocks = np.sum(out_shape)
-    if args[0] != None:
-      stride = [1]
-      for s in reversed(shapes[:-1]): 
-        stride.insert(0, stride[0]*s)
-      stride = stride[args[0]]
-    else: 
-      stride=1
-
+    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    dim, _blocks = len(in_shape), np.prod(in_shape) // np.sum(out_shape)
+    stride = LLVMCodegen.get_strides(in_shape, args[0])
+    block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride) if 0 < args[0] < dim-1 else None
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
-    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
-    inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
-    inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
-    inp_builder.branch(loop_block)
+    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}_{args[0]}")
+    inp_block = fxn.append_basic_block(name = 'entry')
+    if block_stride: 
+      global_block = fxn.append_basic_block(name='globalidx')
+      global_builder = ir.IRBuilder(global_block)
+    local_block = fxn.append_basic_block(name='localidx')
+    local_builder = ir.IRBuilder(local_block)
+    inp_builder = ir.IRBuilder(inp_block)
+    # TODO: setup global idx
+    if block_stride:
+      global_builder.branch(local_block)
+      global_block_exit = fxn.append_basic_block(name='localidx_exit')
+      global_builder_exit = ir.IRBuilder(global_block_exit)
+      inp_builder.branch(global_block)
+    else:
+      inp_builder.branch(local_block)
+    
+    out_block = fxn.append_basic_block(name = 'out')
+    out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), _blocks)
 
-    idx = loop_builder.phi(ir.IntType(32))
-    idx.add_incoming(s_ptr, inp_block)
-    indx, cache = idx, []
-    print(_blocks, stride)
-    for x in range(np.prod(shapes) // _blocks):
-      if stride == 1:
-        indx = loop_builder.mul(idx, ir.Constant(ir.IntType(32), np.prod(shapes)//_blocks))
-        indx = loop_builder.add(indx, ir.Constant(ir.IntType(32), x))
-        av = loop_builder.load(loop_builder.gep(fxn.args[0], [indx]))
-      else: 
-        av = loop_builder.load(loop_builder.gep(fxn.args[0], [indx]))
-        indx = loop_builder.add(indx, ir.Constant(ir.IntType(32), stride))
+    # local strides and shit
+    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.sum(out_shape))
+    local_idx = local_builder.phi(ir.IntType(32))
+    local_idx.add_incoming(local_s, inp_block)
+    indx, cache = local_idx, []
+    for x in range(np.prod(in_shape) // np.sum(out_shape)):
+      if stride == 1: 
+        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), _blocks))
+        indx = local_builder.add(indx, ir.Constant(ir.IntType(32), x))
+        av = local_builder.load(local_builder.gep(fxn.args[0], [indx]))
+      else:
+        av = local_builder.load(local_builder.gep(fxn.args[0], [indx]))
+        indx = local_builder.add(indx, ir.Constant(ir.IntType(32), stride))
       cache.append(av)
-
     out = cache[0]
-    out = loop_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
+    out = local_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
     for i in range(1, len(cache)):
-      out = self.op_map[op](loop_builder, cache[i], out)
+      out = self.op_map[op](local_builder, cache[i], out)
+    
+    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx])
+    local_builder.store(out, local_e_ptr)
 
-    out_ptr = loop_builder.gep(fxn.args[1], [idx]) 
-    loop_builder.store(out, out_ptr)
-
-    idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
-    idx.add_incoming(idx_n, loop_block)
-    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
+    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
+    local_idx.add_incoming(local_e_n, local_block)
+    local_builder.cbranch(local_builder.icmp_unsigned("<", local_idx, local_e), local_block, out_block)
     self.main_builder.call(fxn, (*input_args, output_arg))
+
+
+
+
 
   def _transpose(self, args):
     pass
 
+  # plan for this is that args contains the slices so we simply read from the slices as our gep 
   def _slice(self, args):
     pass
 
