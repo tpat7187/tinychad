@@ -157,9 +157,11 @@ class LLVMCodegen:
     inp_builder = ir.IRBuilder(inp_block)
     # TODO: setup global idx
     if block_stride:
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.sum(out_shape))
       global_builder.branch(local_block)
-      global_block_exit = fxn.append_basic_block(name='localidx_exit')
+      global_block_exit = fxn.append_basic_block(name='globalidx_exit')
       global_builder_exit = ir.IRBuilder(global_block_exit)
+      global_idx = global_builder.phi(ir.IntType(32))
       inp_builder.branch(global_block)
     else:
       inp_builder.branch(local_block)
@@ -171,7 +173,14 @@ class LLVMCodegen:
     # local strides and shit
     local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.sum(out_shape))
     local_idx = local_builder.phi(ir.IntType(32))
-    local_idx.add_incoming(local_s, inp_block)
+    if block_stride:
+      local_idx.add_incoming(local_s, global_block)
+      global_idx.add_incoming(inp_block, global_block_exit)
+      global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
+      global_idx.add_incoming(global_e_n, global_block_exit)
+      #global_builder.cbranch(global_builder.icmp_unsigned("<", global_idx, global_e), global_block, out_block)
+    else:
+      local_idx.add_incoming(local_s, inp_block)
     indx, cache = local_idx, []
     for x in range(np.prod(in_shape) // np.sum(out_shape)):
       if stride == 1: 
@@ -186,11 +195,17 @@ class LLVMCodegen:
     out = local_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
     for i in range(1, len(cache)):
       out = self.op_map[op](local_builder, cache[i], out)
+
+    # need to store: global_idx * local*idx
     
-    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx])
-    local_builder.store(out, local_e_ptr)
+
+    if block_stride: 
+      local_builder.mul(global_idx, ir.Constant(ir.IntType(32), block_stride))
 
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
+    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx])
+
+    local_builder.store(out, local_e_ptr)
     local_idx.add_incoming(local_e_n, local_block)
     local_builder.cbranch(local_builder.icmp_unsigned("<", local_idx, local_e), local_block, out_block)
     self.main_builder.call(fxn, (*input_args, output_arg))
