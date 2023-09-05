@@ -146,14 +146,12 @@ class LLVMCodegen:
   # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
   def shape_op(self, op, shapes, output_arg, input_args, args):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
-    dim, _blocks = len(in_shape), np.prod(in_shape) // np.sum(out_shape)
     stride = LLVMCodegen.get_strides(in_shape, args[0])
     block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride)
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}_{args[0]}")
-    #fxn.attributes._known = fxn.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
-    #fxn.attributes.add('"no-nans-fp-math"="true"')
     inp_block = fxn.append_basic_block(name = 'entry')
+    block_size = in_shape[args[0]] if args[0] != None else np.prod(in_shape)
     if block_stride: 
       global_block = fxn.append_basic_block(name='globalidx')
       global_builder = ir.IRBuilder(global_block)
@@ -162,7 +160,7 @@ class LLVMCodegen:
     inp_builder = ir.IRBuilder(inp_block)
     # TODO: setup global idx
     if block_stride:
-      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 2)
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), block_size)
       global_block_exit = fxn.append_basic_block(name='globalidx_exit')
       global_builder_exit = ir.IRBuilder(global_block_exit)
       global_idx = global_builder.phi(ir.IntType(32))
@@ -177,9 +175,9 @@ class LLVMCodegen:
 
     # local strides and shit
     print(stride, block_stride)
-    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(out_shape))
+    # local_e needs to change depending on the size of the block
+    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), block_stride if block_stride else np.prod(out_shape))
     local_idx = local_builder.phi(ir.IntType(32))
-    # define how the local_idx moves
     indx, cache = local_idx, []
     if block_stride:
       local_idx.add_incoming(local_s, global_block)
@@ -188,8 +186,6 @@ class LLVMCodegen:
       indx = local_builder.add(local_idx, block_stride_idx)
     else:
       local_idx.add_incoming(local_s, inp_block)
-    # BLOCK SIZE (how many adds need to be performed)
-    block_size = in_shape[args[0]] if args[0] != None else np.prod(in_shape)
     for x in range(block_size):
       if stride == 1: 
         indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), block_size))
@@ -203,24 +199,25 @@ class LLVMCodegen:
     out = local_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
     for i in range(1, len(cache)):
       out = self.op_map[op](local_builder, cache[i], out)
+    if block_stride: 
+      store_idx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), stride))
+      store_idx = local_builder.add(store_idx, local_idx)
+      local_e_ptr = local_builder.gep(fxn.args[1], [store_idx], inbounds=True)
+    else:
+      local_e_ptr = local_builder.gep(fxn.args[1], [local_idx], inbounds=True)
 
-    # need to store: global_idx * local*idx
-    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx], inbounds=True)
     local_builder.store(out, local_e_ptr)
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
     local_idx.add_incoming(local_e_n, local_block)
     if block_stride:
-      local_builder.cbranch(local_builder.icmp_unsigned("==", local_idx, local_e_n), global_block_exit, local_block)
+      # local loop should not be terminating on global_e
+      local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit, local_block)
       global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
       global_idx.add_incoming(global_e_n, global_block_exit)
-      global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_idx, global_e), out_block, global_block)
+      global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
     else:
       local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), out_block, local_block)
     self.main_builder.call(fxn, (*input_args, output_arg))
-
-
-
-
 
   def _transpose(self, args):
     pass
