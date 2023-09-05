@@ -51,6 +51,7 @@ class LLVMCodegen:
     ShapeOPS = [ops.SUM, ops.MAX]
     ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
 
+
     s, tt = [j[0] for j in self._cache], {}
     for j in range(len(self._cache)):
       tt[s[j]] = self.args[j]
@@ -128,26 +129,30 @@ class LLVMCodegen:
   # if stride AND block_stride > 1 NEED new loop
   # stride and block_stride function
 
-
   @staticmethod
   def get_strides(shape, axis):
     stride = 1
+    if not axis: return stride
     for i in range(axis+1, len(shape)):
         stride *= shape[i]
     return stride
 
   @staticmethod 
   def get_block_stride(shape, axis, stride):
-    return stride * shape[axis]
+    if axis and 0 < axis < len(shape)-1: return stride * shape[axis]
+    else: return None
+
 
   # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
   def shape_op(self, op, shapes, output_arg, input_args, args):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
     dim, _blocks = len(in_shape), np.prod(in_shape) // np.sum(out_shape)
     stride = LLVMCodegen.get_strides(in_shape, args[0])
-    block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride) if 0 < args[0] < dim-1 else None
+    block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride)
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}_{args[0]}")
+    #fxn.attributes._known = fxn.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
+    #fxn.attributes.add('"no-nans-fp-math"="true"')
     inp_block = fxn.append_basic_block(name = 'entry')
     if block_stride: 
       global_block = fxn.append_basic_block(name='globalidx')
@@ -157,12 +162,12 @@ class LLVMCodegen:
     inp_builder = ir.IRBuilder(inp_block)
     # TODO: setup global idx
     if block_stride:
-      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.sum(out_shape))
-      global_builder.branch(local_block)
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 2)
       global_block_exit = fxn.append_basic_block(name='globalidx_exit')
       global_builder_exit = ir.IRBuilder(global_block_exit)
       global_idx = global_builder.phi(ir.IntType(32))
       inp_builder.branch(global_block)
+      global_builder.branch(local_block)
     else:
       inp_builder.branch(local_block)
     
@@ -171,24 +176,27 @@ class LLVMCodegen:
     out_builder.ret_void()
 
     # local strides and shit
-    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.sum(out_shape))
+    print(stride, block_stride)
+    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(out_shape))
     local_idx = local_builder.phi(ir.IntType(32))
+    # define how the local_idx moves
+    indx, cache = local_idx, []
     if block_stride:
       local_idx.add_incoming(local_s, global_block)
-      global_idx.add_incoming(inp_block, global_block_exit)
-      global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
-      global_idx.add_incoming(global_e_n, global_block_exit)
-      #global_builder.cbranch(global_builder.icmp_unsigned("<", global_idx, global_e), global_block, out_block)
+      global_idx.add_incoming(global_s, inp_block)
+      block_stride_idx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), block_stride))
+      indx = local_builder.add(local_idx, block_stride_idx)
     else:
       local_idx.add_incoming(local_s, inp_block)
-    indx, cache = local_idx, []
-    for x in range(np.prod(in_shape) // np.sum(out_shape)):
+    # BLOCK SIZE
+    for x in range(in_shape[args[0]] if args[0] else np.prod(in_shape)):
       if stride == 1: 
-        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), _blocks))
+        # STRIDE?
+        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), 3))
         indx = local_builder.add(indx, ir.Constant(ir.IntType(32), x))
-        av = local_builder.load(local_builder.gep(fxn.args[0], [indx]))
+        av = local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True))
       else:
-        av = local_builder.load(local_builder.gep(fxn.args[0], [indx]))
+        av = local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True))
         indx = local_builder.add(indx, ir.Constant(ir.IntType(32), stride))
       cache.append(av)
     out = cache[0]
@@ -197,17 +205,17 @@ class LLVMCodegen:
       out = self.op_map[op](local_builder, cache[i], out)
 
     # need to store: global_idx * local*idx
-    
-
-    if block_stride: 
-      local_builder.mul(global_idx, ir.Constant(ir.IntType(32), block_stride))
-
-    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
-    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx])
-
+    local_e_ptr = local_builder.gep(fxn.args[1], [local_idx], inbounds=True)
     local_builder.store(out, local_e_ptr)
+    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
     local_idx.add_incoming(local_e_n, local_block)
-    local_builder.cbranch(local_builder.icmp_unsigned("<", local_idx, local_e), local_block, out_block)
+    if block_stride:
+      local_builder.cbranch(local_builder.icmp_unsigned("==", local_idx, local_e_n), global_block_exit, local_block)
+      global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
+      global_idx.add_incoming(global_e_n, global_block_exit)
+      global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_idx, global_e), out_block, global_block)
+    else:
+      local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), out_block, local_block)
     self.main_builder.call(fxn, (*input_args, output_arg))
 
 
