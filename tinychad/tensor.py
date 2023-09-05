@@ -237,7 +237,6 @@ class tensor:
       out.append(cache[j].pad(pad_t))
     return sum(out)
   
-  # cast to shape
   def cast_to(self, shape): 
     assert is_castable(self.shape, shape)
     return self.cast(shape)
