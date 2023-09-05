@@ -1,6 +1,3 @@
-import sys
-sys.path.insert(1, '../') 
-
 from tinychad.tensor import tensor, Linear, Conv2d, BatchNorm2d
 import numpy as np
 

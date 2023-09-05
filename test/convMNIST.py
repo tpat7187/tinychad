@@ -1,6 +1,3 @@
-import sys
-sys.path.insert(1, '../')
-
 from tinychad.tensor import tensor, Linear, Conv2d, BatchNorm2d
 from tinychad.optim import SGD
 from tinychad.helpers import get_parameters

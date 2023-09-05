@@ -236,6 +236,11 @@ class tensor:
       pad_t[axis] = [self.shape[0]*j, self.shape[0]*(len(args)*1-j)]
       out.append(cache[j].pad(pad_t))
     return sum(out)
+  
+  # cast to shape
+  def cast_to(self, shape): 
+    assert is_castable(self.shape, shape)
+    return self.cast(shape)
 
   def unsqueeze(self, axis: int) -> tensor:
     dim = (self.shape[:axis] + (1,) + self.shape[axis:])

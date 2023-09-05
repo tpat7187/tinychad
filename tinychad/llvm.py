@@ -66,7 +66,7 @@ class LLVMCodegen:
           # pass in entire output buffer
           self.shape_op(j[2], j[3], output_arg, input_args, args)
         if j[2] in ReshapeOPS: 
-          self._reshape(j[2], j[1], output_arg, input_args)
+          self._cast(j[2], j[3], output_arg, input_args)
 
   def compile(self): 
     self.parse_cache()
@@ -226,8 +226,31 @@ class LLVMCodegen:
   def _slice(self, args):
     pass
 
-  def _cast(self, args):
-    pass
+  def _cast(self, op, shapes, output_arg, input_args):
+    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
+    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}")
+    length = np.prod(in_shape)
+    inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
+    inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
+    inp_builder.branch(loop_block)
+    out_builder.ret_void()
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), length)
+    # loop has n iterations for n elements in input shape
+    idx = loop_builder.phi(ir.IntType(32))
+    idx.add_incoming(s_ptr, inp_block)
+    indx = idx
+    # load from A, store in B at
+    for x in range(length): 
+      av = loop_builder.load(loop_builder.gep(fxn.args[0], [indx]))
+      indx = loop_builder.add(indx, ir.Constant(ir.IntType(32), 1))
+      out_ptr = loop_builder.gep(output_arg, [idx])
+      loop_builder.store(av, out_ptr)
+    idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
+    idx.add_incoming(idx_n, loop_block)
+    loop_builder.cbranch(loop_builder.icmp_unsigned("==", idx, e_ptr), loop_block, out_block)
+    self.generated_fxns.add(fxn.name)
+    self.main_builder.call(fxn, (*input_args, output_arg))
 
   def _pad(self, args):
     pass
@@ -251,7 +274,6 @@ class LLVMCodegen:
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
     self.generated_fxns.add(fxn.name)
     self.main_builder.call(fxn, (*input_args, output_arg))
-    pass
   
 
 

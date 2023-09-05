@@ -1,7 +1,3 @@
-import sys
-
-sys.path.insert(1, '../')
-
 from tinychad.tensor import tensor
 import numpy as np
 import torch
