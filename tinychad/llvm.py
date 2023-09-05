@@ -132,7 +132,7 @@ class LLVMCodegen:
   @staticmethod
   def get_strides(shape, axis):
     stride = 1
-    if not axis: return stride
+    if axis == None: return stride
     for i in range(axis+1, len(shape)):
         stride *= shape[i]
     return stride
@@ -188,11 +188,11 @@ class LLVMCodegen:
       indx = local_builder.add(local_idx, block_stride_idx)
     else:
       local_idx.add_incoming(local_s, inp_block)
-    # BLOCK SIZE
-    for x in range(in_shape[args[0]] if args[0] else np.prod(in_shape)):
+    # BLOCK SIZE (how many adds need to be performed)
+    block_size = in_shape[args[0]] if args[0] != None else np.prod(in_shape)
+    for x in range(block_size):
       if stride == 1: 
-        # STRIDE?
-        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), 3))
+        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), block_size))
         indx = local_builder.add(indx, ir.Constant(ir.IntType(32), x))
         av = local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True))
       else:
