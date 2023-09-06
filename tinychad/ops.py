@@ -3,12 +3,8 @@ import numpy as np
 from tinychad.tensor import OP
 from typing import Union
 from enum import Enum, auto
-
-class UnaryOPS(Enum): RELU = auto(); NEG = auto(); LOG = auto(); EXP = auto(); SQRT = auto();
-class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MATMUL = auto(); 
-class ShapeOPS(Enum): MAX = auto(); SUM = auto();
-class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); TRANSPOSE = auto();
-
+from tinychad.buffers import Buffer
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 class LOAD(OP): 
   def __init__(self, saved = None):
@@ -17,36 +13,42 @@ class LOAD(OP):
 
 # binary ops
 class ADD(OP): 
+  # buffers passed in, not tensors
   @staticmethod
-  def forward(x, y): return x.data + y.data
+  def forward(x:Buffer, y:Buffer) -> Buffer: 
+    return x.binary_op(np.add, y)
   
   def backward(self, out_grad, out): 
     return out_grad, out_grad
 
 class SUB(OP): 
   @staticmethod
-  def forward(x, y): return x.data - y.data
+  def forward(x:Buffer, y:Buffer) -> Buffer:
+    return x.binary_op(np.sub, y)
   
   def backward(self, out_grad, out): 
     return out_grad, -out_grad
 
 class MUL(OP): 
   @staticmethod
-  def forward(x, y): return x.data * y.data
+  def forward(x:Buffer, y:Buffer) -> Buffer:
+    return x.binary_op(np.mul, y)
 
   def backward(self, out_grad, out):
     return out_grad * self.saved[1].data, out_grad*self.saved[0].data
 
 class DIV(OP): 
   @staticmethod
-  def forward(x, y): return x.data / y.data
+  def forward(x:Buffer, y:Buffer) -> Buffer:
+    return x.binary_op(np.div, y)
   
   def backward(self, out_grad, out):
     return (self.saved[1].data**-1) * out_grad, -(self.saved[0].data/self.saved[1].data**2)*out_grad
 
 class MATMUL(OP): 
   @staticmethod
-  def forward(x, y): return np.matmul(x.data, y.data)
+  def forward(x:Buffer, y:Buffer) -> Buffer:
+    return x.matmul(y)
 
   def backward(self, out_grad, out):
     return np.matmul(out_grad, self.saved[1].T().data), np.matmul(self.saved[0].T().data, out_grad)
@@ -54,35 +56,40 @@ class MATMUL(OP):
 # unary ops
 class RELU(OP):
   @staticmethod
-  def forward(x): return np.maximum(x.data, 0)
+  def forward(x:Buffer) -> Buffer:
+    return x.unary_op(UnaryOPS.RELU)
 
   def backward(self, out_grad, out):
     return (out > 0)*out_grad
 
 class EXP(OP): 
   @staticmethod
-  def forward(x): return np.exp(x.data)
+  def forward(x:Buffer) -> Buffer:
+    return x.unary_op(np.exp)
 
   def backward(self, out_grad, out):
     return out * out_grad
 
 class LOG(OP): 
   @staticmethod
-  def forward(x): return np.log(x.data)
+  def forward(x:Buffer) -> Buffer:
+    return x.unary_op(np.log)
 
   def backward(self, out_grad, out):
     return out_grad / self.saved[0].data
 
 class NEG(OP): 
   @staticmethod
-  def forward(x): return -1*x.data
+  def forward(x:Buffer) -> Buffer:
+    return x.unary_op(np.negative)
 
   def backward(self, out_grad, out): 
     return -1*out_grad
 
 class SQRT(OP): 
   @staticmethod 
-  def forward(x): return np.sqrt(x.data)
+  def forward(x:Buffer) -> Buffer:
+    return x.unary_op(np.sqrt)
 
   def backward(self, out_grad, out): 
     return (1 / 2 * out_grad**2)
@@ -90,16 +97,16 @@ class SQRT(OP):
 # shape ops
 class SUM(OP):
   @staticmethod
-  def forward(x, axis, keepdim):
-    return np.array([x.data.sum(keepdims = keepdim)]) if axis is None else x.data.sum(axis=axis, keepdims = keepdim)
+  def forward(x:Buffer, axis, keepdim) -> Buffer:
+    return x.shape_op(np.sum, axis, keepdim)
 
   def backward(self, out_grad, out):
     return np.broadcast_to(out_grad, self.saved[0].shape)
       
 class MAX(OP): 
   @staticmethod
-  def forward(x, axis, keepdim): 
-    return np.array([x.data.max(keepdims = keepdim)]) if axis is None else x.data.max(axis=axis, keepdims = keepdim)
+  def forward(x:Buffer, axis, keepdim) -> Buffer: 
+    return x.shape_op(np.max, axis, keepdim)
 
   def backward(self, out_grad, out):
     axis, kd = self.ctx[0], self.ctx[1]

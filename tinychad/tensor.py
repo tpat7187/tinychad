@@ -3,6 +3,7 @@ import numpy as np
 import os
 import time
 from typing import List, Optional, Tuple, Union, Type
+from tinychad.buffers import Buffer
 
 
 DEBUG = os.getenv("DEBUG") 
@@ -19,6 +20,16 @@ class OP:
 
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
+    if DEBUG: st = time.monotonic()
+    out = tensor(self.forward(*[j.data for j in x], **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
+    if DEBUG: 
+      et= time.monotonic() - st
+      in_s = list(n.shape for n in out.op.saved)
+      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
+    return out
+
+  '''
+  def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if LAZY and lazy == False:
       lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
       out = tensor(LazyBuffer(lazyshape, self, children= [j.data for j in x]), op = self(saved = [*x], ctx = list(kwargs.values())))
@@ -30,6 +41,9 @@ class OP:
       in_s = list(n.shape for n in out.op.saved)
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
     return out
+  '''
+
+  
 
 import tinychad.ops as ops
 
@@ -38,10 +52,10 @@ class tensor:
   __slots__ = "data", "requires_grad", "op", "grad"
   def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = None):
     if isinstance(data, (np.ndarray, LazyBuffer)): 
-      self.data = data
+      self.data = Buffer(data)
 
-    if isinstance(data, (int, list, float)): 
-      self.data = np.array(data, dtype=np.float32)
+    if isinstance(data, (int, list, float, np.float32)): 
+      self.data = Buffer(data)
 
     # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
 
