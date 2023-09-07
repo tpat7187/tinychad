@@ -25,6 +25,7 @@ op_map = {
 }
 
 class Buffer: 
+    __slots__ = "dat", "shape"
     def __init__(self, dat):
         if isinstance(dat, np.ndarray):
             self.dat = dat
@@ -35,12 +36,9 @@ class Buffer:
         if isinstance(dat, list):
             self.dat = np.array(dat, dtype=np.float32)
         
+        self.shape = self.dat.shape
 
-    def __repr__(self): return str(self.dat)
-
-
-    @property 
-    def shape(self): return self.dat.shape
+    def __repr__(self): return f"{self.shape} Buffer"
 
     @property 
     def dtype(self): return self.dat.dtype
@@ -75,4 +73,9 @@ class Buffer:
 # new lazy buffer
 class LazyBuffer: 
     def __init__(self, shape, op, children): 
+        pass
+
+# this may just be a LazyBuffer with a different codegen module
+class GPUBuffer: 
+    def __init__(self, shape, op):
         pass

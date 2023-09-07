@@ -44,17 +44,17 @@ def train(model, optim, xtrain, ytrain):
     ind = np.random.randint(0,59000, size=BS)
     inp = xtrain[ind][:].reshape(BS,1,28,28).astype(np.float32)
     out = model.forward(tensor(inp))
-    res = ytrain[ind]
+    res = tensor(ytrain[ind])
     loss = out.NLLLoss(res)
 
-    cat = np.argmax(out.data, axis=1)
+    cat = np.argmax(out.data.dat, axis=1)
     acc = np.sum(cat == ytrain[ind])
 
     optim.zero_grad()
     loss.backward()
     optim.step()
     
-    t.set_description("loss %.6f acc %.2f" % (loss.data, acc / BS))
+    t.set_description("loss %.6f acc %.2f" % (loss.data.dat, acc / BS))
 
 train(model, optim, xtrain, ytrain)
 

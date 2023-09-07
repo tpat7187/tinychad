@@ -1,4 +1,4 @@
-from tinychad.tensor import tensor
+from tinychad.tensor import tensor 
 import numpy as np
 import torch
 import unittest
@@ -34,7 +34,7 @@ def test_helper_fw(shapes, torchfxn, tinychadfxn, axis = None, keepdim=None):
       xt = torchfxn(at, dim = axis).values if axis != None else torchfxn(at)
 
     try: 
-      np.testing.assert_allclose(x.exec().data, xt.detach().numpy(), atol =1e-6 , rtol =1e-3)
+      np.testing.assert_allclose(x.detach(), xt.detach().numpy(), atol =1e-6 , rtol =1e-3)
     except Exception: 
       raise Exception(f"<fw pass failure> tinychad: {x.data}, pytorch{xt.detatch().numpy()}")
 
@@ -110,7 +110,7 @@ def conv_pool_test_helper_fw(tinychadfxn, torchfxn, input_shape, kernel_size, bi
 
 
   try: 
-    np.testing.assert_allclose(x.data, xt.detach().numpy(), atol=1e-6, rtol=1e-3)
+    np.testing.assert_allclose(x.detach(), xt.detach().numpy(), atol=1e-6, rtol=1e-3)
     np.testing.assert_allclose(a.grad, at.grad, atol=1e-6, rtol=1e-3)
     if tinychadfxn == tensor.conv2d and bias != None:
       np.testing.assert_allclose(b.grad, bt.grad, atol=1e-6, rtol=1e-3)

@@ -50,7 +50,7 @@ def test_linear_helper(input_size, output_size, steps, batch_size):
     tinychad_optim.step()
     torch_optim.step()
 
-    np.testing.assert_allclose(torch_loss.item(), tc_loss.data, atol=1e-5, rtol=1e-3)
+    np.testing.assert_allclose(torch_loss.item(), tc_loss.data.dat, atol=1e-5, rtol=1e-3)
 
 
   
@@ -113,7 +113,7 @@ def test_conv2d_helper(in_channels, out_channels, kernel_size, steps, batch_size
     tinychad_optim.step()
     torch_optim.step()
 
-    np.testing.assert_allclose(torch_loss.item(), tc_loss.data, atol=1e-5, rtol=1e-3)
+    np.testing.assert_allclose(torch_loss.item(), tc_loss.data.dat, atol=1e-5, rtol=1e-3)
 
 
 def test_batchnorm2d_helper(self, steps):

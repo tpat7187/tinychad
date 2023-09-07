@@ -18,6 +18,7 @@ class OP:
   def forward(x, y): return f"forward not implemented for {self.arg}" 
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
+  # TODO: Lazybuffers back here pls
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if DEBUG: st = time.monotonic()
@@ -27,22 +28,6 @@ class OP:
       in_s = list(n.shape for n in out.op.saved)
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
     return out
-
-  '''
-  def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
-    if LAZY and lazy == False:
-      lazyshape = ViewTracker.generate_view(self, *x, **kwargs)
-      out = tensor(LazyBuffer(lazyshape, self, children= [j.data for j in x]), op = self(saved = [*x], ctx = list(kwargs.values())))
-      return out
-    if DEBUG: st = time.monotonic()
-    out =  tensor(self.forward(*x, **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
-    if DEBUG: 
-      et= time.monotonic() - st
-      in_s = list(n.shape for n in out.op.saved)
-      print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
-    return out
-  '''
-
   
 
 import tinychad.ops as ops
@@ -148,7 +133,6 @@ class tensor:
   def mean(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
     out = self.sum(axis=axis, keepdim=keepdim)
     ss = out * (np.prod(out.shape) / np.prod(self.shape)).astype(np.float32)
-    print(out.data)
     return ss
 
   def var(self, axis:Optional[Union[Tuple[int, ...], int]]=None, keepdim:Optional[bool]=False) -> tensor:
@@ -156,6 +140,8 @@ class tensor:
     ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
+
+  def detach(self) -> np.ndarray: return self.data.dat
 
   def reciprocal(self) -> tensor: return 1 / self
 
@@ -277,7 +263,7 @@ class tensor:
     assert(self.shape == (1,))
     self.grad = np.ones(self.shape, dtype=np.float32)
     for x in reversed(self.toposort()): 
-      grads = x.op.backward(x.grad, x.data)
+      grads = x.op.backward(x.grad, x.detach())
       if len(x.op.saved) == 1: 
         grads = [grads]
       for buf, gr in zip(x.op.saved, grads): 
@@ -307,10 +293,10 @@ class tensor:
     y = tensor(y)
     return y
   
-  # takes labels and logprobs (doesnt need one hot encoding)
+  # indexing based on y_true.data which is a buffer, rn slice only supports ndarray, int
   def NLLLoss(self, y_true: tensor) -> tensor:
     batch_s = self.shape[0]
-    idx_probs = self[np.arange(batch_s).astype(np.int32), y_true.data]
+    idx_probs = self[np.arange(batch_s).astype(np.int32), y_true.detach()]
     loss = (batch_s / -idx_probs.sum()).reciprocal()
     return loss
 
