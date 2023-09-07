@@ -1,5 +1,6 @@
 from __future__ import annotations
 import numpy as np 
+from typing import Union, Tuple
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 op_map = { 
@@ -26,7 +27,7 @@ op_map = {
 
 class Buffer: 
     __slots__ = "dat", "shape"
-    def __init__(self, dat):
+    def __init__(self, dat:Union[np.ndarray, list, float, np.float32]):
         if isinstance(dat, np.ndarray):
             self.dat = dat
 
@@ -43,11 +44,11 @@ class Buffer:
     @property 
     def dtype(self): return self.dat.dtype
 
-    def __add__(self, x): return self.binary_op(BinaryOPS.ADD, x)
-    def __sub__(self, x): return self.binary_op(BinaryOPS.SUB, x)
-    def __mul__(self, x): return self.binary_op(BinaryOPS.MUL, x)
-    def __div__(self, x): return self.binary_op(BinaryOPS.DIV, x)
-    def __matmul__(self, x): return self.binary_op(BinaryOPS.MATMUL, x)
+    def __add__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.ADD, x)
+    def __sub__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.SUB, x)
+    def __mul__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.MUL, x)
+    def __div__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.DIV, x)
+    def __matmul__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.MATMUL, x)
 
     def exp(self): return self.unary_op(UnaryOPS.EXP)
     def log(self): return self.unary_op(UnaryOPS.LOG)
@@ -63,19 +64,87 @@ class Buffer:
         if fxn == ReshapeOPS.PAD: assert isinstance(args, (tuple, list))
         if fxn == ReshapeOPS.SLICE: return self.slice(args)
         return op_map[fxn](self.dat, args)
-        
-    def slice(x, args): 
+    
+    def slice(x:Buffer, args) -> Buffer:
         args = (args) if isinstance(args, int) else args
         out = x.dat[tuple(*args)]
         return out if out.shape != () else [out]
 
-
 # new lazy buffer
 class LazyBuffer: 
+    __slots__ = "shape", "op", "children", "dtype"
     def __init__(self, shape, op, children): 
-        pass
+        self.shape = shape
+        self.op = op 
+        self.children = children
+        self.dtype = np.float32
+
+    def binary_op(self, fxn, x): return LazyBuffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+    def unary_op(self, fxn): return LazyBuffer(self.shape, fxn, [self])
+    def shape_op(self, fxn, axis, keepdim): return LazyBuffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self])
+    def reshape_op(self, fxn, args): return LazyBuffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self])
+
 
 # this may just be a LazyBuffer with a different codegen module
 class GPUBuffer: 
     def __init__(self, shape, op):
         pass
+
+class ViewTracker: 
+  @classmethod
+  def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:LazyBuffer, **kwargs) -> Tuple[int, ...]:
+    ReshapeOPHelpers = {
+      ReshapeOPS.RESHAPE: self._reshape,
+      ReshapeOPS.SLICE: self._slice,
+      ReshapeOPS.TRANSPOSE: self._transpose,
+      ReshapeOPS.PAD: self._pad,
+      ReshapeOPS.CAST: self._cast,
+    }
+
+    if op in BinaryOPS:
+      assert in_buffers[0].shape[1] == in_buffers[1].shape[0] if op == BinaryOPS.MATMUL else in_buffers[0].shape == in_buffers[1].shape
+      out_s = (in_buffers[0].shape[0], in_buffers[1].shape[1]) if op == BinaryOPS.MATMUL else in_buffers[0].shape 
+      return out_s
+    elif op in UnaryOPS: 
+      out_s = in_buffers[0].shape
+      return out_s
+    elif op in ShapeOPS:
+      axis, keepdim = kwargs['axis'], kwargs['keepdim']
+      if axis is None: out_s = (1,)
+      else:
+        nx = list(axis) if isinstance(axis, tuple) else [axis]
+        l = list(in_buffers.shape)
+        for j in nx: l[j] =0 
+        out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
+      return out_s
+    elif op in ReshapeOPS: 
+      return ReshapeOPHelpers[op](in_buffers, kwargs)
+    
+  def _reshape(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
+    out_s = tuple(arg)
+    if -1 in arg:
+      idx = arg.index(-1)
+      _cur = np.prod([j for j in arg if j != -1])
+      arg[idx] = np.prod(in_s)//_cur
+      out_s = tuple(arg)
+    return out_s
+
+  def _slice(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+    arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
+    # TEMPORARY HACK 
+    # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
+    # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
+    out_s = np.empty(in_s.shape)[arg].shape
+    out_s = (1,) if out_s == () else out_s
+    return out_s 
+
+  def _transpose(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+    arg, in_s = list(kwargs['args']), list(in_s.shape)
+    return tuple([in_s[i] for i in arg])
+
+  def _pad(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+    return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
+    
+  def _cast(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+    return tuple(kwargs['args'])

@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 from tinychad.tensor import OP
 from typing import Union
-from tinychad.buffers import Buffer
+from tinychad.buffers import Buffer, LazyBuffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 class LOAD(OP): 

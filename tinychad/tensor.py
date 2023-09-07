@@ -3,7 +3,8 @@ import numpy as np
 import os
 import time
 from typing import List, Optional, Tuple, Union, Type
-from tinychad.buffers import Buffer
+from tinychad.buffers import Buffer, LazyBuffer
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 
 DEBUG = os.getenv("DEBUG") 
@@ -28,7 +29,6 @@ class OP:
       in_s = list(n.shape for n in out.op.saved)
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))
     return out
-  
 
 import tinychad.ops as ops
 
@@ -36,7 +36,13 @@ import tinychad.ops as ops
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
   def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = None):
-    self.data = Buffer(data)
+    if LAZY:
+      if isinstance(data, LazyBuffer): 
+        self.data = data
+      else:
+        self.data = LazyBuffer(data.shape, op, None)
+    else:
+      self.data = Buffer(data)
 
     # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
 
@@ -72,7 +78,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
+    return f"{type(self.data).__name__}: op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -231,7 +237,7 @@ class tensor:
       out.append(cache[j].pad(pad_t))
     return sum(out)
   
-  def cast_to(self, shape): 
+  def cast_to(self, shape:Tuple[int, ...]) -> tensor:
     assert is_castable(self.shape, shape)
     return self.cast(shape)
 
@@ -244,7 +250,7 @@ class tensor:
     dim = (self.shape[:axis] + self.shape[1+axis:])
     return self.reshape(*dim)
 
-  def flatten(self): return self.reshape(-1,)
+  def flatten(self) -> tensor: return self.reshape(-1,)
  
   def toposort(self) -> Tuple[tensor, ...]: 
     topo, vis = [], []
@@ -285,7 +291,7 @@ class tensor:
   
   # one hot encodes tensor acts on data so as to not join computation graph
   @classmethod
-  def OHE(self, real, classes):
+  def OHE(self, real:tensor, classes:int) -> tensor:
     r = real.flatten().astype(np.int32)
     y = np.zeros((r.shape[0], classes), np.float32)
     y[range(y.shape[0]), r] = -1.0*classes
@@ -366,6 +372,8 @@ class tensor:
       s = self.op.saved[0].reshape_op(self.op, args = self.op.ctx[0], lazy = True)
     self.data = s.data
     return self
+
+  def typecast(self, dtype): return self.detach().astype(dtype)
   
   # if NOT lazybuffer then its realized
   def realized(self) -> bool: return not isinstance(self.data, LazyBuffer)
@@ -429,85 +437,3 @@ def is_castable(x:Tuple[int, ...], y:Tuple[int, ...]) -> bool:
       return False
   return True
 
-class LazyBuffer: 
-  def __init__(self, shape:Tuple[int, ...], op:ops.OP, children=None):
-    self.shape, self.op = shape, op
-    self.children = children
-
-# LLVM Buffer needs input and output shapes and zero intitalized tensors
-class LLVMBuffer: 
-  def __init__(self, shape:Tuple[int, ...], op:ops.OP, children=None): 
-    self.op = op
-    self.out_shape = None
-    self.data = np.zeros(self.in_shape)
-    self.children = children
-
-
-def typecast(self, dtype): return self.data.astype(dtype)
-
-class ViewTracker: 
-  @classmethod
-  def generate_view(self, op: ops.OP, *args, **kwargs) -> Tuple[int, ...]:
-    # we should use enums before i go insane
-    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
-    ShapeOPS = [ops.SUM, ops.MAX]
-    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-    # is this cringe
-    ReshapeOPHelpers = {
-      ops.RESHAPE: self._reshape,
-      ops.SLICE: self._slice,
-      ops.TRANSPOSE: self._transpose,
-      ops.PAD: self._pad,
-      ops.CAST: self._cast,
-    }
-
-    args = list(args)
-    if op in BinaryOPS:
-      assert args[0].shape[1] == args[1].shape[0] if op == ops.MATMUL else args[0].shape == args[1].shape
-      out_s = (args[0].shape[0], args[1].shape[1]) if op == ops.MATMUL else args[0].shape 
-      return out_s
-    elif op in UnaryOPS: 
-      out_s = args[0].shape
-      return out_s
-    elif op in ShapeOPS:
-      axis, keepdim = kwargs['axis'], kwargs['keepdim']
-      if axis is None: out_s = (1,)
-      else:
-        nx = list(axis) if isinstance(axis, tuple) else [axis]
-        l = list(args[0].shape)
-        for j in nx: l[j] =0 
-        out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
-      return out_s
-    elif op in ReshapeOPS: 
-      return ReshapeOPHelpers[op](args[0], kwargs)
-    
-  def _reshape(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
-    arg, in_s = list(kwargs['args']), list(in_s.shape)
-    out_s = tuple(arg)
-    if -1 in arg:
-      idx = arg.index(-1)
-      _cur = np.prod([j for j in arg if j != -1])
-      arg[idx] = np.prod(in_s)//_cur
-      out_s = tuple(arg)
-    return out_s
-
-  def _slice(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
-    arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
-    # TEMPORARY HACK 
-    # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
-    # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
-    out_s = np.empty(in_s.shape)[arg].shape
-    out_s = (1,) if out_s == () else out_s
-    return out_s 
-
-  def _transpose(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
-    arg, in_s = list(kwargs['args']), list(in_s.shape)
-    return tuple([in_s[i] for i in arg])
-
-  def _pad(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
-    return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
-    
-  def _cast(in_s: tensor, kwargs: dict) -> Tuple[int, ...]:
-    return tuple(kwargs['args'])

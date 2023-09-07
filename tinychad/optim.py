@@ -25,5 +25,5 @@ class SGD(Optimizer):
       if self.momentum:
         self.v[i] = (self.momentum * self.v[i]) + param.grad
         param.grad = self.v[i]
-      param.data.dat = param.data.dat - self.lr*param.grad
+      param.data.dat = param.detach() - self.lr*param.grad
 
