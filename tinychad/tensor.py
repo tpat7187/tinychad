@@ -51,11 +51,7 @@ import tinychad.ops as ops
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
   def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = None):
-    if isinstance(data, (np.ndarray, LazyBuffer)): 
-      self.data = Buffer(data)
-
-    if isinstance(data, (int, list, float, np.float32)): 
-      self.data = Buffer(data)
+    self.data = Buffer(data)
 
     # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
 
@@ -94,9 +90,7 @@ class tensor:
     return f"op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
   
   # TODO: getitem by tensor index
-  def __getitem__(self, args): 
-    if isinstance(args, int): return self.slice((args))
-    elif isinstance(args, tuple): return self.slice(args)
+  def __getitem__(self, args): return self.slice(args)
 
   def __dict__(self): 
     return {'requires_grad' : self.requires_grad, 'shape' : self.shape}
