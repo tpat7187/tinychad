@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np 
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 op_map = { 
@@ -70,20 +70,38 @@ class Buffer:
         out = x.dat[tuple(*args)]
         return out if out.shape != () else [out]
 
+
 # new lazy buffer
 class LazyBuffer: 
-    __slots__ = "shape", "op", "children", "dtype"
-    def __init__(self, shape, op, children): 
-        self.shape = shape
-        self.op = op 
-        self.children = children
-        self.dtype = np.float32
+    __slots__ = "shape", "op", "children", "data", "ctx"
+    def __init__(self, shape, op, children:Optional[LazyBuffer]=None, data:Optional[np.ndarray]=None, ctx=None): 
+        self.shape, self.op, self.children, self.data = shape, op, children, data
+        self.ctx = ctx
 
-    def binary_op(self, fxn, x): return LazyBuffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
-    def unary_op(self, fxn): return LazyBuffer(self.shape, fxn, [self])
-    def shape_op(self, fxn, axis, keepdim): return LazyBuffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self])
-    def reshape_op(self, fxn, args): return LazyBuffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self])
+    def binary_op(self, fxn, x:LazyBuffer) -> LazyBuffer: 
+       return LazyBuffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+    def unary_op(self, fxn) -> LazyBuffer: 
+       return LazyBuffer(self.shape, fxn, [self])
+    def shape_op(self, fxn, axis, keepdim) -> LazyBuffer: 
+       return LazyBuffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+    def reshape_op(self, fxn, args) -> LazyBuffer: 
+       return LazyBuffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
+    # a LazyBuffer is realized if its data is not None
+    def realized(self:LazyBuffer) -> bool: return self.data is not None
+
+    def exec(self:LazyBuffer) -> Buffer:
+        for f in self.children:
+           if not f.realized(): f.exec()
+        if self.op in (BinaryOPS or UnaryOPS):
+            s = op_map[self.op](*[j.data for j in self.children])
+        elif self.op in ShapeOPS:
+            axis, keepdim = self.ctx
+            s = op_map[self.op](*[j.data for j in self.children], axis=axis, keepdims=keepdim)
+        elif self.op in ReshapeOPS:
+            args = self.ctx
+            s = op_map[self.op](self.dat, args)
+        return Buffer(s)
 
 # this may just be a LazyBuffer with a different codegen module
 class GPUBuffer: 
@@ -113,7 +131,7 @@ class ViewTracker:
       if axis is None: out_s = (1,)
       else:
         nx = list(axis) if isinstance(axis, tuple) else [axis]
-        l = list(in_buffers.shape)
+        l = list(in_buffers[0].shape)
         for j in nx: l[j] =0 
         out_s = tuple([i for i in l if i!=0]) if keepdim == False else tuple([1 if i == 0 else i for i in l])
       return out_s

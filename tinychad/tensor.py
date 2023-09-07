@@ -16,10 +16,9 @@ class OP:
     self.saved = saved
     self.ctx = ctx
 
-  def forward(x, y): return f"forward not implemented for {self.arg}" 
+  def forward(self, x, y): return f"forward not implemented for {self.arg}" 
   def backward(self, out_grad, out): return f"backward not implemented for {self.arg}" 
 
-  # TODO: Lazybuffers back here pls
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if DEBUG: st = time.monotonic()
@@ -40,7 +39,7 @@ class tensor:
       if isinstance(data, LazyBuffer): 
         self.data = data
       else:
-        self.data = LazyBuffer(data.shape, op, None)
+        self.data = LazyBuffer(data.shape, op, None, data)
     else:
       self.data = Buffer(data)
 
@@ -78,7 +77,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"{type(self.data).__name__}: op = <{self.op.arg}>: shape = {self.shape}" #lazycache = {self._cache}"
+    return f"{type(self.data).__name__}: op = <{self.op.arg}>: shape = {self.shape}"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -147,7 +146,10 @@ class tensor:
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
 
-  def detach(self) -> np.ndarray: return self.data.dat
+  def detach(self) -> np.ndarray: 
+    if not self.realized(): 
+      self.exec()
+    return self.data.dat
 
   def reciprocal(self) -> tensor: return 1 / self
 
@@ -265,7 +267,6 @@ class tensor:
     return topo
 
   def backward(self):
-    self.exec()
     assert(self.shape == (1,))
     self.grad = np.ones(self.shape, dtype=np.float32)
     for x in reversed(self.toposort()): 
@@ -355,22 +356,7 @@ class tensor:
   # whats important is that we preserve the ordering of the cache
 
   def exec(self) -> tensor:
-    if self.realized(): return self
-    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
-    ShapeOPS = [ops.SUM, ops.MAX]
-    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-    for f in self.op.saved: 
-      if not f.realized(): f.exec()
-    if type(self.op) in (BinaryOPS + UnaryOPS):
-      s = self.op.apply(*[j for j in self.op.saved], lazy = True)
-    elif type(self.op) in ShapeOPS:
-      axis, keepdim = self.op.ctx[0], self.op.ctx[1]
-      s = self.op.apply(*[j for j in self.op.saved], axis=axis, keepdim=keepdim, lazy = True)
-    elif type(self.op) in ReshapeOPS: 
-      s = self.op.saved[0].reshape_op(self.op, args = self.op.ctx[0], lazy = True)
-    self.data = s.data
+    self.data = self.data.exec()
     return self
 
   def typecast(self, dtype): return self.detach().astype(dtype)
