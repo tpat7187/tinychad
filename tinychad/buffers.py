@@ -27,15 +27,15 @@ op_map = {
 
 class Buffer: 
     __slots__ = "dat", "shape"
-    def __init__(self, dat:Union[np.ndarray, list, float, np.float32]):
-        if isinstance(dat, np.ndarray):
-            self.dat = dat
+    def __init__(self, data:Union[np.ndarray, list, float, np.float32]):
+        if isinstance(data, np.ndarray):
+            self.data = data
 
-        if isinstance(dat, (int, float, np.float32)):
-            self.dat = np.array([dat], dtype=np.float32)
+        if isinstance(data, (int, float, np.float32)):
+            self.data = np.array([data], dtype=np.float32)
 
-        if isinstance(dat, list):
-            self.dat = np.array(dat, dtype=np.float32)
+        if isinstance(data, list):
+            self.data = np.array(data, dtype=np.float32)
         
         self.shape = self.dat.shape
 
@@ -57,17 +57,17 @@ class Buffer:
     def sqrt(self): return self.unary_op(UnaryOPS.SQRT)
 
     # fxn example: BinaryOPS.ADD
-    def binary_op(self, fxn, x): return op_map[fxn](self.dat, x.dat)
-    def unary_op(self, fxn): return op_map[fxn](self.dat)
-    def shape_op(self, fxn, axis, keepdim): return op_map[fxn](self.dat, axis=axis, keepdims=keepdim)
+    def binary_op(self, fxn, x): return op_map[fxn](self.data, x.data)
+    def unary_op(self, fxn): return op_map[fxn](self.data)
+    def shape_op(self, fxn, axis, keepdim): return op_map[fxn](self.data, axis=axis, keepdims=keepdim)
     def reshape_op(self, fxn, args): 
         if fxn == ReshapeOPS.PAD: assert isinstance(args, (tuple, list))
         if fxn == ReshapeOPS.SLICE: return self.slice(args)
-        return op_map[fxn](self.dat, args)
+        return op_map[fxn](self.data, args)
     
     def slice(x:Buffer, args) -> Buffer:
         args = (args) if isinstance(args, int) else args
-        out = x.dat[tuple(*args)]
+        out = x.data[tuple(*args)]
         return out if out.shape != () else [out]
 
 
@@ -100,7 +100,7 @@ class LazyBuffer:
             s = op_map[self.op](*[j.data for j in self.children], axis=axis, keepdims=keepdim)
         elif self.op in ReshapeOPS:
             args = self.ctx
-            s = op_map[self.op](self.dat, args)
+            s = op_map[self.op](self.data, args)
         return Buffer(s)
 
 # this may just be a LazyBuffer with a different codegen module

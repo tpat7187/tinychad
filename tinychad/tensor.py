@@ -149,7 +149,7 @@ class tensor:
   def detach(self) -> np.ndarray: 
     if not self.realized(): 
       self.exec()
-    return self.data.dat
+    return self.data.data
 
   def reciprocal(self) -> tensor: return 1 / self
 
@@ -333,7 +333,7 @@ class tensor:
           loads.append((hex(id(i)), i.shape, type(i.op), i))
       _saved = tuple([hex(id(f)) for f in s.op.saved])
       if isinstance(s.data, LazyBuffer): 
-        s.data = np.zeros(s.shape, dtype=np.float32)
+        s.data.data = np.zeros(s.shape, dtype=np.float32)
       _reg = (hex(id(s)), s.shape, type(s.op), s) + _saved
       cache.append(_reg)
     return loads + cache
@@ -361,8 +361,9 @@ class tensor:
 
   def typecast(self, dtype): return self.detach().astype(dtype)
   
-  # if NOT lazybuffer then its realized
-  def realized(self) -> bool: return not isinstance(self.data, LazyBuffer)
+  # if LazyBuffer has data it is realized
+  def realized(self) -> bool: 
+    return self.data.realized()
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 

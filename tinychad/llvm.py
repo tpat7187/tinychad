@@ -24,7 +24,7 @@ class LLVMCodegen:
     self.out_builder.ret_void()
 
     self.args = self.main.args
-    self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
+    self._bufs_ptr = [j.data.ctypes.data_as(c_void_p) for j in self._bufs]
     self.generated_fxns = set()
     # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
     # supposedly there is an intrinsic function already for matmuls
