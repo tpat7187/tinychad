@@ -26,7 +26,7 @@ op_map = {
 }
 
 class Buffer: 
-    __slots__ = "dat", "shape"
+    __slots__ = "data", "shape"
     def __init__(self, data:Union[np.ndarray, list, float, np.float32]):
         if isinstance(data, np.ndarray):
             self.data = data
@@ -37,9 +37,11 @@ class Buffer:
         if isinstance(data, list):
             self.data = np.array(data, dtype=np.float32)
         
-        self.shape = self.dat.shape
+        self.shape = self.data.shape
 
     def __repr__(self): return f"{self.shape} Buffer"
+
+    def realized(self): return True
 
     @property 
     def dtype(self): return self.dat.dtype

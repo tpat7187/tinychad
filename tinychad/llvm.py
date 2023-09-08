@@ -57,15 +57,20 @@ class LLVMCodegen:
       tt[s[j]] = self.args[j]
     for j in self._cache: 
       if j[2] != ops.LOAD:
+        in_shape, out_shape = j[3].op.saved[0].shape, j[3].shape
+        fxn_name = f"{str(j[2].__name__)}_{in_shape}_{out_shape}"
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
         output_arg = tt[j[0]]
-        if j[2] in (BinaryOPS + UnaryOPS):
-          self.elementwise_op(j[2], j[1], output_arg, input_args)
-        if j[2] in ShapeOPS:
-          args = j[3].op.ctx
-          self.shape_op(j[2], j[3], output_arg, input_args, args)
-        if j[2] in ReshapeOPS: 
-          self._cast(j[2], j[3], output_arg, input_args)
+        if fxn_name in self.generated_fxns:
+          self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
+        else:
+          if j[2] in (BinaryOPS + UnaryOPS):
+            self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
+          if j[2] in ShapeOPS:
+            args = j[3].op.ctx
+            self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
+          if j[2] in ReshapeOPS: 
+            self._cast(j[2], j[3], output_arg, input_args, fxn_name)
 
 
   # function names should be decided before we call the kernel
@@ -74,8 +79,6 @@ class LLVMCodegen:
     fxn_name = f"{str(op.__name__)}_{in_shape[0]}"
     if fxn_name in self.generated_fxns:
       self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
-
-    return True
 
   def compile(self): 
     self.parse_cache()
@@ -100,16 +103,16 @@ class LLVMCodegen:
 
   # unary + binary sans MATMUL
   # there has to be a way to do some fusing for the codegen
-  def elementwise_op(self, op, shapes, output_arg, input_args):
+  def elementwise_op(self, op, shapes, output_arg, input_args, fxn_name):
     # generate new function
     num_in_buffers = len(input_args)
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
-    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
+    fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes))
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape))
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
     av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
@@ -153,12 +156,12 @@ class LLVMCodegen:
 
 
   # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-  def shape_op(self, op, shapes, output_arg, input_args, args):
+  def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
     stride = LLVMCodegen.get_strides(in_shape, args[0])
     block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride)
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
-    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}_{args[0]}")
+    fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block = fxn.append_basic_block(name = 'entry')
     block_size = in_shape[args[0]] if args[0] != None else np.prod(in_shape)
     if block_stride: 
@@ -238,11 +241,11 @@ class LLVMCodegen:
 
   # needs stride depending on what axis this is broadcasted to
   # for now we should support only one axis broadcasting at a time (5,1,1) -> (5,5,5) is a little harder
-  def _cast(self, op, shapes, output_arg, input_args):
+  def _cast(self, op, shapes, output_arg, input_args, fxn_name):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
     axis = [i for i, (a, b) in enumerate(zip(out_shape, in_shape)) if a != b][0]
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
-    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}")
+    fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, global_block, local_block, global_block_exit, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'globalidx'), fxn.append_basic_block('localidx'), fxn.append_basic_block('globalidx_edit'), fxn.append_basic_block(name = 'out')
     inp_builder, global_builder, local_builder, global_builder_exit, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(global_block), ir.IRBuilder(local_block), ir.IRBuilder(global_block_exit), ir.IRBuilder(out_block)
     global_s, global_e, global_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape)), global_builder.phi(ir.IntType(32))
@@ -252,7 +255,7 @@ class LLVMCodegen:
     inp_builder.branch(global_block)
     global_builder.branch(local_block)
 
-    axis_idx = [global_idx, local_idx]
+    axis_idx = [local_idx, global_idx]
     av = local_builder.load(local_builder.gep(fxn.args[0], [axis_idx[axis]]))
     indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), np.prod(in_shape)))
     indx = local_builder.add(indx, local_idx)
@@ -277,9 +280,9 @@ class LLVMCodegen:
     pass
 
   # this should just be a simple elementwise copy
-  def _reshape(self, op, shapes, output_arg, input_args):
+  def _reshape(self, op, shapes, output_arg, input_args, fxn_name):
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
-    fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{shapes[0]}")
+    fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
