@@ -25,7 +25,7 @@ class LLVMCodegen:
 
     self.args = self.main.args
     self._bufs_ptr = [j.data.ctypes.data_as(c_void_p) for j in self._bufs]
-    self.generated_fxns = set()
+    self.generated_fxns = {}
     # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
     # supposedly there is an intrinsic function already for matmuls
     self.op_map = {
@@ -63,10 +63,19 @@ class LLVMCodegen:
           self.elementwise_op(j[2], j[1], output_arg, input_args)
         if j[2] in ShapeOPS:
           args = j[3].op.ctx
-          # pass in entire output buffer
           self.shape_op(j[2], j[3], output_arg, input_args, args)
         if j[2] in ReshapeOPS: 
           self._cast(j[2], j[3], output_arg, input_args)
+
+
+  # function names should be decided before we call the kernel
+  def reuse_kernel(self, op, shapes, output_arg, input_args):
+    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    fxn_name = f"{str(op.__name__)}_{in_shape[0]}"
+    if fxn_name in self.generated_fxns:
+      self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
+
+    return True
 
   def compile(self): 
     self.parse_cache()
@@ -112,7 +121,7 @@ class LLVMCodegen:
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
     loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
-    self.generated_fxns.add(fxn.name)
+    self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   # sum/max, axis is a accumulate with a stride
@@ -217,6 +226,7 @@ class LLVMCodegen:
       global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
     else:
       local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), out_block, local_block)
+    self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   def _transpose(self, args):
@@ -227,27 +237,40 @@ class LLVMCodegen:
     pass
 
   # needs stride depending on what axis this is broadcasted to
+  # for now we should support only one axis broadcasting at a time (5,1,1) -> (5,5,5) is a little harder
   def _cast(self, op, shapes, output_arg, input_args):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    axis = [i for i, (a, b) in enumerate(zip(out_shape, in_shape)) if a != b][0]
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = f"{str(op.__name__)}_{in_shape[0]}")
-    inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
-    inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
-    inp_builder.branch(loop_block)
+    inp_block, global_block, local_block, global_block_exit, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'globalidx'), fxn.append_basic_block('localidx'), fxn.append_basic_block('globalidx_edit'), fxn.append_basic_block(name = 'out')
+    inp_builder, global_builder, local_builder, global_builder_exit, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(global_block), ir.IRBuilder(local_block), ir.IRBuilder(global_block_exit), ir.IRBuilder(out_block)
+    global_s, global_e, global_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape)), global_builder.phi(ir.IntType(32))
+    local_s, local_e, local_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape)), local_builder.phi(ir.IntType(32))
+    global_idx.add_incoming(global_s, inp_block)
+    local_idx.add_incoming(local_s, global_block)
+    inp_builder.branch(global_block)
+    global_builder.branch(local_block)
+
+    axis_idx = [global_idx, local_idx]
+    av = local_builder.load(local_builder.gep(fxn.args[0], [axis_idx[axis]]))
+    indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), np.prod(in_shape)))
+    indx = local_builder.add(indx, local_idx)
+    bv = local_builder.gep(fxn.args[1], [indx])
+    local_builder.store(av, bv)
+    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
+    local_idx.add_incoming(local_e_n, local_block)
+    local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit, local_block)
+
+
+    global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
+    global_idx.add_incoming(global_e_n, global_block_exit)
+    global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
+
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape))
-    idx = loop_builder.phi(ir.IntType(32))
-    idx.add_incoming(s_ptr, inp_block)
-    out_idx_start = loop_builder.mul(idx, ir.Constant(ir.IntType(32), out_shape[1]))
-    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
-    for x in range(out_shape[1]):
-      out_idx = loop_builder.add(out_idx_start, ir.Constant(ir.IntType(32), x))
-      out_ptr = loop_builder.gep(output_arg, [out_idx])
-      loop_builder.store(av, out_ptr)
-    idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
-    idx.add_incoming(idx_n, loop_block)
-    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx_n, e_ptr), loop_block, out_block)
-    self.generated_fxns.add(fxn.name)
+
+    #loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx_n, e_ptr), loop_block, out_block)
+    self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   def _pad(self, args):

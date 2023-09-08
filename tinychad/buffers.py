@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np 
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, List
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
 op_map = { 
@@ -74,9 +74,14 @@ class Buffer:
 # new lazy buffer
 class LazyBuffer: 
     __slots__ = "shape", "op", "children", "data", "ctx"
-    def __init__(self, shape, op, children:Optional[LazyBuffer]=None, data:Optional[np.ndarray]=None, ctx=None): 
+    def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
         self.shape, self.op, self.children, self.data = shape, op, children, data
         self.ctx = ctx
+
+    
+
+    @property 
+    def dtype(self): return np.float32
 
     def binary_op(self, fxn, x:LazyBuffer) -> LazyBuffer: 
        return LazyBuffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
