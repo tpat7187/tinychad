@@ -277,15 +277,25 @@ class tensor:
           buf.grad = gr if buf.grad is None else gr + buf.grad
       x.grad = None if not x.requires_grad else x.grad
 
-  def cast_op(self, fxn: ops.op, x: tensor, reverse:bool) -> tensor:
+  def cast_op(self, fxn:ops.OP, x: tensor, reverse:bool) -> tensor:
     x, y = (self, x) if reverse == False else (x, self)
     # if we add array to tensor the array expands a dimension, data should be in a Buffer class
     # self.grad -> Buffer, self.data -> Buffer
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: return fxn.apply(x,y)
+
+    diff = len(x.shape) - len(y.shape)
+    if diff > 0: 
+      y =  y.reshape(*((1,) * diff + y.shape))
+      if y.shape == x.shape: 
+        return y
+    elif diff < 0: 
+      x =  x.reshape(*((1,) * -diff + x.shape))
+      if y.shape == x.shape: 
+        return x
+
     cst, shp, ot, axis = castable(x,y)
-    # preserves casting order based on castable outputs
     if axis == 1: cst = cst.cast(shp)
     if axis == 0: ot = ot.cast(shp)
     return fxn.apply(cst, ot) 

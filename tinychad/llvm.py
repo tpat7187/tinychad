@@ -50,22 +50,19 @@ class LLVMCodegen:
   @classmethod
   def generate_kernel_name(self, token) -> str:
     if token[2] == BinaryOPS.MATMUL:
-      in_shape1 = token[3].op.saved[0].shape
-      in_shape2 = token[3].op.saved[1].shape
+      in_shape1, in_shape2 = token[3].op.saved[0].shape, token[3].op.saved[1].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape1])}{''.join(['_' + str(j) for j in in_shape2])}"
       return fxn_name
-    elif token[2] in BinaryOPS or UnaryOPS:
+    elif token[2] in BinaryOPS or token[2] in UnaryOPS:
       in_shape = token[3].op.saved[0].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}"
       return fxn_name
     elif token[2] in ShapeOPS: 
-      in_shape = token[3].op.saved[0].shape
-      axis = token[3].op.ctx
+      in_shape, axis = token[3].op.saved[0].shape, token[3].op.ctx
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{'_' + str(axis[0]) if axis[0] is not None else ''}"
       return fxn_name
-    elif token[2] in ReshapeOPS:
-      in_shape = token[3].op.saved[0].shape
-      out_shape = token[3].shape
+    else:
+      in_shape, out_shape = token[3].op.saved[0].shape, token[3].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{''.join(['_' + str(j) for j in out_shape])}"
       return fxn_name
       
@@ -152,7 +149,7 @@ class LLVMCodegen:
     inp_block, global_block, local_block, global_block_exit, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'globalidx'), fxn.append_basic_block('localidx'), fxn.append_basic_block('globalidx_edit'), fxn.append_basic_block(name = 'out')
     inp_builder, global_builder, local_builder, global_builder_exit, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(global_block), ir.IRBuilder(local_block), ir.IRBuilder(global_block_exit), ir.IRBuilder(out_block)
     global_s, global_e, global_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), in_shape[0]), global_builder.phi(ir.IntType(32))
-    local_s, local_e, local_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), in_shape[0]), local_builder.phi(ir.IntType(32))
+    local_s, local_e, local_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), out_shape[1]), local_builder.phi(ir.IntType(32))
     global_idx.add_incoming(global_s, inp_block)
     local_idx.add_incoming(local_s, global_block)
     inp_builder.branch(global_block)
@@ -166,14 +163,14 @@ class LLVMCodegen:
 
     bv = []
     for x in range(in_shape[1]): 
-      l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*out_shape[0]))
+      l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*out_shape[1]))
       bv.append(local_builder.load(local_builder.gep(fxn.args[1], [l_indx])))
 
     acc = ir.Constant(ir.FloatType(), 0.0)
     for i,j in zip(av, bv): 
       acc = local_builder.fadd(local_builder.fmul(i, j), acc)
 
-    out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, ir.Constant(ir.IntType(32), out_shape[0])))
+    out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, ir.Constant(ir.IntType(32), out_shape[1])))
     out = local_builder.store(acc, local_builder.gep(fxn.args[2], [out_ptr]))
     out_builder.ret_void()
 
@@ -304,10 +301,6 @@ class LLVMCodegen:
   # we assume that the shapes are of the same dim
   def _cast(self, op, shapes, output_arg, input_args, fxn_name):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
-    if len(in_shape) - len(out_shape) != 0: 
-      diff = len(in_shape) - len(out_shape)
-      diff = [1 for j in range(abs(len(in_shape) - len(out_shape)))]
-      in_shape = tuple([*in_shape, *diff])
     axis = [i for i, (a, b) in enumerate(zip(out_shape, in_shape)) if a != b][0]
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
@@ -344,7 +337,6 @@ class LLVMCodegen:
 
   # this should just be a simple elementwise copy
   def _reshape(self, op, shapes, output_arg, input_args, fxn_name):
-    print(shapes)
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
@@ -359,7 +351,7 @@ class LLVMCodegen:
     loop_builder.store(av, out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
-    loop_builder.cbranch(loop_builder.icmp_unsigned("==", idx, e_ptr), loop_block, out_block)
+    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
     self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
   
