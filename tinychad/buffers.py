@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np 
 from typing import Union, Tuple, Optional, List
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 
 op_map = { 
     BinaryOPS.ADD   : lambda x, y: np.add(x,y),
@@ -44,7 +44,7 @@ class Buffer:
     def realized(self): return True
 
     @property 
-    def dtype(self): return self.dat.dtype
+    def dtype(self): return self.data.dtype
 
     def __add__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.ADD, x)
     def __sub__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.SUB, x)
@@ -77,10 +77,16 @@ class Buffer:
 class LazyBuffer: 
     __slots__ = "shape", "op", "children", "data", "ctx"
     def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
-        self.shape, self.op, self.children, self.data = shape, op, children, data
+        self.shape, self.op, self.children = shape, op, children
         self.ctx = ctx
-
-    
+        if data is None: 
+           self.data = data
+        elif isinstance(data, np.ndarray):
+            self.data = data
+        elif isinstance(data, (int, float, np.float32)):
+            self.data = np.array([data], dtype=np.float32)
+        elif isinstance(data, list):
+            self.data = np.array(data, dtype=np.float32)
 
     @property 
     def dtype(self): return np.float32

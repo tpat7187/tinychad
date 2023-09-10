@@ -9,7 +9,7 @@ goals:
 TODO: 
   * computation graph
   * LLVM/MLIR backend
-    * all primitive ops generating LLVM
+    * may still be value in tinychad -> MLIR -> LLVM IR -> WASM
     * MNIST IN THE WEB
   * update training/testing
     * batchnorm2d passing tests

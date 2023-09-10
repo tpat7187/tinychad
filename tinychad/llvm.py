@@ -3,6 +3,7 @@ import llvmlite.ir as ir
 import llvmlite.binding as llvm
 from typing import Union, Tuple, List, Optional
 import tinychad.ops as ops
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS
 from ctypes import c_void_p, CFUNCTYPE
 import ctypes
 
@@ -29,58 +30,69 @@ class LLVMCodegen:
     # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
     # supposedly there is an intrinsic function already for matmuls
     self.op_map = {
-      ops.ADD : lambda builder, x, y: builder.fadd(x,y),
-      ops.SUB : lambda builder, x, y: builder.fsub(x,y),
-      ops.MUL : lambda builder, x, y: builder.fmul(x,y),
-      ops.DIV : lambda builder, x, y: builder.fdiv(x,y),
+      BinaryOPS.ADD : lambda builder, x, y: builder.fadd(x,y),
+      BinaryOPS.SUB : lambda builder, x, y: builder.fsub(x,y),
+      BinaryOPS.MUL : lambda builder, x, y: builder.fmul(x,y),
+      BinaryOPS.DIV : lambda builder, x, y: builder.fdiv(x,y),
 
-      ops.NEG: lambda builder, x: builder.fmul(x, ir.Constant(ir.FloatType(), -1)),
-      ops.EXP: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
-      ops.LOG: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
-      ops.SQRT: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.sqrt', [ir.FloatType()]), [x]),
-      ops.RELU: lambda builder, x: builder.select(builder.fcmp_unordered(">", x, ir.Constant(ir.FloatType(), 0)), x, ir.Constant(ir.FloatType(), 0)),
+      UnaryOPS.NEG: lambda builder, x: builder.fmul(x, ir.Constant(ir.FloatType(), -1)),
+      UnaryOPS.EXP: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
+      UnaryOPS.LOG: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.log', [ir.FloatType()]), [x]),
+      UnaryOPS.SQRT: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.sqrt', [ir.FloatType()]), [x]),
+      UnaryOPS.RELU: lambda builder, x: builder.select(builder.fcmp_unordered(">", x, ir.Constant(ir.FloatType(), 0)), x, ir.Constant(ir.FloatType(), 0)),
 
-      ops.SUM: lambda builder, x, y: builder.fadd(x,y),
-      ops.MAX: lambda builder, x, y: builder.select(builder.fcmp_unordered(">", x, y), x, y)
+      ShapeOPS.SUM: lambda builder, x, y: builder.fadd(x,y),
+      ShapeOPS.MAX: lambda builder, x, y: builder.select(builder.fcmp_unordered(">", x, y), x, y)
+
     }
+
+
+  @classmethod
+  def generate_kernel_name(self, token) -> str:
+    if token[2] == BinaryOPS.MATMUL:
+      in_shape1 = token[3].op.saved[0].shape
+      in_shape2 = token[3].op.saved[1].shape
+      fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape1])}{''.join(['_' + str(j) for j in in_shape2])}"
+      return fxn_name
+    elif token[2] in BinaryOPS or UnaryOPS:
+      in_shape = token[3].op.saved[0].shape
+      fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}"
+      return fxn_name
+    elif token[2] in ShapeOPS: 
+      in_shape = token[3].op.saved[0].shape
+      axis = token[3].op.ctx
+      fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{'_' + str(axis[0]) if axis[0] is not None else ''}"
+      return fxn_name
+    elif token[2] in ReshapeOPS:
+      in_shape = token[3].op.saved[0].shape
+      out_shape = token[3].shape
+      fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{''.join(['_' + str(j) for j in out_shape])}"
+      return fxn_name
       
 
   def parse_cache(self): 
-    BinaryOPS = [ops.ADD, ops.SUB, ops.MUL, ops.DIV, ops.MATMUL]
-    UnaryOPS = [ops.RELU, ops.LOG, ops.EXP, ops.NEG, ops.SQRT]
-    ShapeOPS = [ops.SUM, ops.MAX]
-    ReshapeOPS = [ops.RESHAPE, ops.SLICE, ops.TRANSPOSE, ops.PAD, ops.CAST]
-
-
     s, tt = [j[0] for j in self._cache], {}
     for j in range(len(self._cache)):
       tt[s[j]] = self.args[j]
     for j in self._cache: 
-      if j[2] != ops.LOAD:
-        in_shape, out_shape = j[3].op.saved[0].shape, j[3].shape
-        fxn_name = f"{str(j[2].__name__)}_{in_shape}_{out_shape}"
+      if type(j[2]) != ops.LOAD:
+        fxn_name = LLVMCodegen.generate_kernel_name(j)
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
         output_arg = tt[j[0]]
         if fxn_name in self.generated_fxns:
           self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
         else:
-          if j[2] == ops.MATMUL: 
+          if j[2] == BinaryOPS.MATMUL: 
             self.llvm_matmul(j[2], j[3], output_arg, input_args, fxn_name)
-          elif j[2] in (BinaryOPS + UnaryOPS):
+          elif j[2] in BinaryOPS or j[2] in UnaryOPS:
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
             args = j[3].op.ctx
             self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
-          elif j[2] in ReshapeOPS: 
+          elif j[2] == ReshapeOPS.CAST: 
             self._cast(j[2], j[3], output_arg, input_args, fxn_name)
-
-
-  # function names should be decided before we call the kernel
-  def reuse_kernel(self, op, shapes, output_arg, input_args):
-    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
-    fxn_name = f"{str(op.__name__)}_{in_shape[0]}"
-    if fxn_name in self.generated_fxns:
-      self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
+          elif j[2] == ReshapeOPS.RESHAPE:
+            self._reshape(j[2], j[3], output_arg, input_args, fxn_name)
 
   def compile(self): 
     self.parse_cache()
@@ -90,6 +102,10 @@ class LLVMCodegen:
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()
     llvm_ir = str(input_ir)
+
+    content = open('test.ll', 'w')
+    content.write(llvm_ir)
+    content.close()
 
     target = llvm.Target.from_default_triple()
     target_machine = target.create_target_machine()
@@ -146,19 +162,19 @@ class LLVMCodegen:
     for x in range(in_shape[1]): 
       g_indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), in_shape[1]))
       g_indx = local_builder.add(g_indx, ir.Constant(ir.IntType(32), x))
-      av.append(local_builder.load(local_builder.gep(input_args[0], [g_indx])))
+      av.append(local_builder.load(local_builder.gep(fxn.args[0], [g_indx])))
 
     bv = []
     for x in range(in_shape[1]): 
       l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*out_shape[0]))
-      bv.append(local_builder.load(local_builder.gep(input_args[1], [l_indx])))
+      bv.append(local_builder.load(local_builder.gep(fxn.args[1], [l_indx])))
 
     acc = ir.Constant(ir.FloatType(), 0.0)
     for i,j in zip(av, bv): 
       acc = local_builder.fadd(local_builder.fmul(i, j), acc)
 
     out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, ir.Constant(ir.IntType(32), out_shape[0])))
-    out = local_builder.store(acc, local_builder.gep(output_arg, [out_ptr]))
+    out = local_builder.store(acc, local_builder.gep(fxn.args[2], [out_ptr]))
     out_builder.ret_void()
 
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
@@ -285,8 +301,13 @@ class LLVMCodegen:
 
   # needs stride depending on what axis this is broadcasted to
   # for now we should support only one axis broadcasting at a time (5,1,1) -> (5,5,5) is a little harder
+  # we assume that the shapes are of the same dim
   def _cast(self, op, shapes, output_arg, input_args, fxn_name):
     in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    if len(in_shape) - len(out_shape) != 0: 
+      diff = len(in_shape) - len(out_shape)
+      diff = [1 for j in range(abs(len(in_shape) - len(out_shape)))]
+      in_shape = tuple([*in_shape, *diff])
     axis = [i for i, (a, b) in enumerate(zip(out_shape, in_shape)) if a != b][0]
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
@@ -309,14 +330,12 @@ class LLVMCodegen:
     local_idx.add_incoming(local_e_n, local_block)
     local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit, local_block)
 
-
     global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
     global_idx.add_incoming(global_e_n, global_block_exit)
     global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
 
     out_builder.ret_void()
 
-    #loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx_n, e_ptr), loop_block, out_block)
     self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
@@ -325,22 +344,23 @@ class LLVMCodegen:
 
   # this should just be a simple elementwise copy
   def _reshape(self, op, shapes, output_arg, input_args, fxn_name):
+    print(shapes)
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, loop_block, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'loop'), fxn.append_basic_block(name = 'out')
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes))
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape))
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
     av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
-    out_ptr = loop_builder.gep(output_arg, [idx])
+    out_ptr = loop_builder.gep(fxn.args[1], [idx])
     loop_builder.store(av, out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
-    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
-    self.generated_fxns.add(fxn.name)
+    loop_builder.cbranch(loop_builder.icmp_unsigned("==", idx, e_ptr), loop_block, out_block)
+    self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
   
 
