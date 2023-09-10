@@ -142,32 +142,28 @@ class LLVMCodegen:
     inp_builder.branch(global_block)
     global_builder.branch(local_block)
 
-    stride = ir.Constant(ir.IntType(32), in_shape[0])
-
     av = []
-    for x in range(in_shape[0]): 
-      g_indx = local_builder.mul(global_idx, stride)
+    for x in range(in_shape[1]): 
+      g_indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), in_shape[1]))
       g_indx = local_builder.add(g_indx, ir.Constant(ir.IntType(32), x))
       av.append(local_builder.load(local_builder.gep(input_args[0], [g_indx])))
 
     bv = []
-    for x in range(in_shape[0]): 
-      l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*in_shape[0]))
+    for x in range(in_shape[1]): 
+      l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*out_shape[0]))
       bv.append(local_builder.load(local_builder.gep(input_args[1], [l_indx])))
 
     acc = ir.Constant(ir.FloatType(), 0.0)
     for i,j in zip(av, bv): 
       acc = local_builder.fadd(local_builder.fmul(i, j), acc)
 
-    out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, stride))
+    out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, ir.Constant(ir.IntType(32), out_shape[0])))
     out = local_builder.store(acc, local_builder.gep(output_arg, [out_ptr]))
-
     out_builder.ret_void()
 
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
     local_idx.add_incoming(local_e_n, local_block)
     local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit, local_block)
-
     global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
     global_idx.add_incoming(global_e_n, global_block_exit)
     global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
