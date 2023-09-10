@@ -306,7 +306,7 @@ class LLVMCodegen:
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, global_block, local_block, global_block_exit, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'globalidx'), fxn.append_basic_block('localidx'), fxn.append_basic_block('globalidx_edit'), fxn.append_basic_block(name = 'out')
     inp_builder, global_builder, local_builder, global_builder_exit, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(global_block), ir.IRBuilder(local_block), ir.IRBuilder(global_block_exit), ir.IRBuilder(out_block)
-    global_s, global_e, global_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape)), global_builder.phi(ir.IntType(32))
+    global_s, global_e, global_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), out_shape[axis]), global_builder.phi(ir.IntType(32))
     local_s, local_e, local_idx = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape)), local_builder.phi(ir.IntType(32))
     global_idx.add_incoming(global_s, inp_block)
     local_idx.add_incoming(local_s, global_block)

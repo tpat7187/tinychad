@@ -279,8 +279,6 @@ class tensor:
 
   def cast_op(self, fxn:ops.OP, x: tensor, reverse:bool) -> tensor:
     x, y = (self, x) if reverse == False else (x, self)
-    # if we add array to tensor the array expands a dimension, data should be in a Buffer class
-    # self.grad -> Buffer, self.data -> Buffer
     y = y if isinstance(y, tensor) else tensor([y])
     x = x if isinstance(x, tensor) else tensor([x])
     if x.shape == y.shape: return fxn.apply(x,y)
@@ -288,12 +286,10 @@ class tensor:
     diff = len(x.shape) - len(y.shape)
     if diff > 0: 
       y =  y.reshape(*((1,) * diff + y.shape))
-      if y.shape == x.shape: 
-        return y
+      if y.shape == x.shape: return fxn.apply(x, y)
     elif diff < 0: 
       x =  x.reshape(*((1,) * -diff + x.shape))
-      if y.shape == x.shape: 
-        return x
+      if y.shape == x.shape: return fxn.apply(x, y)
 
     cst, shp, ot, axis = castable(x,y)
     if axis == 1: cst = cst.cast(shp)
