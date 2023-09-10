@@ -127,7 +127,7 @@ class LLVMCodegen:
     inp_builder, loop_builder, out_builder = ir.IRBuilder(inp_block), ir.IRBuilder(loop_block), ir.IRBuilder(out_block)
     inp_builder.branch(loop_block)
     out_builder.ret_void()
-    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape))
+    s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape)) #this is 1 too large?
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
     av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
@@ -138,7 +138,7 @@ class LLVMCodegen:
     loop_builder.store(self.op_map[op](loop_builder, *tuple(inputs)), out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
-    loop_builder.cbranch(loop_builder.icmp_unsigned("<", idx, e_ptr), loop_block, out_block)
+    loop_builder.cbranch(loop_builder.icmp_unsigned("==", idx_n, e_ptr), out_block, loop_block)
     self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
@@ -313,7 +313,10 @@ class LLVMCodegen:
     inp_builder.branch(global_block)
     global_builder.branch(local_block)
 
-    axis_idx = [local_idx, global_idx]
+    if in_shape == (1,1): 
+      axis_idx = [local_idx, local_idx]
+    else:
+      axis_idx = [local_idx, global_idx]
     av = local_builder.load(local_builder.gep(fxn.args[0], [axis_idx[axis]]))
     indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), np.prod(in_shape)))
     indx = local_builder.add(indx, local_idx)
