@@ -94,6 +94,11 @@ class LLVMCodegen:
   def compile(self): 
     self.parse_cache()
     self.main_builder.branch(self.out_block)
+  
+    # to compile wasm emcc test.bc -s WASM=1 -s EXPORTED_FUNCTIONS=["_malloc, _main, _free"] -o test.js
+    self.mod.triple = "wasm32-unknown-unknown"
+    self.mod.data_layout ="e-m:e-p:32:32-i64:64-n32:64-S128"
+
     input_ir = self.mod
     llvm.initialize()
     llvm.initialize_native_target()
@@ -242,8 +247,6 @@ class LLVMCodegen:
     out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
 
-    # local strides and shit
-    print(stride, block_stride)
     # local_e needs to change depending on the size of the block
     local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), block_stride if block_stride else np.prod(out_shape))
     local_idx = local_builder.phi(ir.IntType(32))
