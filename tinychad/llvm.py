@@ -17,12 +17,18 @@ class LLVMCodegen:
     self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))])
     self.main = ir.Function(self.mod, self.fun_t, name = 'main')
 
+    self.buffer_block  = self.main.append_basic_block(name = 'buffers')
+    self.buffer_builder = ir.IRBuilder(self.buffer_block)
+
     self.main_block  = self.main.append_basic_block(name = 'main')
     self.main_builder = ir.IRBuilder(self.main_block)
 
     self.out_block  = self.main.append_basic_block(name = 'exit')
     self.out_builder = ir.IRBuilder(self.out_block)
     self.out_builder.ret_void()
+
+
+    self.loaded=0
 
     self.args = self.main.args
     self._bufs_ptr = [j.data.ctypes.data_as(c_void_p) for j in self._bufs]
@@ -68,36 +74,45 @@ class LLVMCodegen:
       
 
   def parse_cache(self): 
-    s, tt = [j[0] for j in self._cache], {}
-    for j in range(len(self._cache)):
-      tt[s[j]] = self.args[j]
-    for j in self._cache: 
-      if type(j[2]) != ops.LOAD:
+    tt = {}
+    for i, j in enumerate(self._cache):
+      if type(j[2]) == ops.LOAD:
+        byte_string = list(j[3].detach().tobytes())
+        tt[j[0]] = self.load_buffer(byte_string, self.loaded)
+      else:
         fxn_name = LLVMCodegen.generate_kernel_name(j)
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
-        output_arg = tt[j[0]]
+
         if fxn_name in self.generated_fxns:
+          output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
           self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
         else:
           if j[2] == BinaryOPS.MATMUL: 
+            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
             self.llvm_matmul(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in BinaryOPS or j[2] in UnaryOPS:
+            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
+            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
             args = j[3].op.ctx
             self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
           elif j[2] == ReshapeOPS.CAST: 
+            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
             self._cast(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] == ReshapeOPS.RESHAPE:
+            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
             self._reshape(j[2], j[3], output_arg, input_args, fxn_name)
+        
 
   def compile(self): 
     self.parse_cache()
+    self.buffer_builder.branch(self.main_block)
     self.main_builder.branch(self.out_block)
   
     # to compile wasm emcc test.bc -s WASM=1 -s EXPORTED_FUNCTIONS=["_malloc, _main, _free"] -o test.js
-    self.mod.triple = "wasm32-unknown-unknown"
-    self.mod.data_layout ="e-m:e-p:32:32-i64:64-n32:64-S128"
+    #self.mod.triple = "wasm32-unknown-unknown"
+    #self.mod.data_layout ="e-m:e-p:32:32-i64:64-n32:64-S128"
 
     input_ir = self.mod
     llvm.initialize()
@@ -291,6 +306,31 @@ class LLVMCodegen:
       local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), out_block, local_block)
     self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
+
+  def load_buffer(self, byte_string, buffer_name):
+    buf_length = len(byte_string)
+    raw_buffer_name, buffer_name = f"raw_buf_{buffer_name}", f"buf_{buffer_name}"
+    byte_array_type = ir.ArrayType(ir.IntType(8), buf_length)
+    global_variable = ir.GlobalVariable(self.mod, byte_array_type, name=raw_buffer_name)
+    global_variable.initializer, global_variable.linkage, global_variable.align = ir.Constant(byte_array_type, byte_string), 'dso_local', 16
+    float_ptr_type = ir.PointerType(ir.FloatType())
+    float_ptr = ir.GlobalVariable(self.mod, float_ptr_type, name=buffer_name)
+    float_ptr.initializer, float_ptr.linkage, float_ptr.align = ir.Constant(float_ptr_type, global_variable.bitcast(float_ptr_type)), 'dso_local', 8
+    self.loaded+=1
+    return self.buffer_builder.load(float_ptr, name=buffer_name)
+
+  # empty buffer
+  def create_buffer(self, buffer_shape, buffer_name):
+    length = np.prod(buffer_shape)
+    buffer_name = f"buf_{buffer_name}"
+    float_array_type = ir.ArrayType(ir.FloatType(), length)
+    float_array = ir.GlobalVariable(self.mod, float_array_type, name = buffer_name)
+    float_array.initializer = ir.Constant(float_array_type, None)
+    float_array.linkage = 'dso_local'
+    float_array.align = 16
+    self.loaded+=1
+    return self.buffer_builder.gep(float_array, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], name= buffer_name)
+
 
   def _transpose(self, args):
     pass
