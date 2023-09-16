@@ -4,11 +4,16 @@ import os
 import time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, LazyBuffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Interpreted, Compiled
 
 
 DEBUG = os.getenv("DEBUG") 
+
+
+# move to device config
 LAZY = os.getenv("LAZY")
+LLVM = os.getenv("LLVM")
+CUDA = os.getenv("CUDA")
 
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
@@ -34,16 +39,18 @@ import tinychad.ops as ops
 # **** TENSOR CLASS ****
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
-  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = ops.LOAD(), requires_grad:Optional[bool] = None):
-    if LAZY:
-      if isinstance(data, LazyBuffer): 
-        self.data = data
-      else:
-        self.data = LazyBuffer(data.shape, op, None, data)
-    else:
-      self.data = Buffer(data)
+  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
+    if LLVM: backend=Compiled.LLVM
+    elif CUDA: backend=Compiled.CUDA
+    else: backend= Interpreted.CPU
 
-    # is there value in finding a way to initialize a tensor with a lazybuffer when on ops.LOAD
+    if backend in Compiled or LAZY:
+      if isinstance(data, LazyBuffer): 
+        self.data, self.data.backend = data, backend
+      else:
+        self.data = LazyBuffer(data.shape, op, None, data, backend=backend)
+    else:
+      self.data = Buffer(data, op) 
 
     self.grad, self.requires_grad, self.op = None, requires_grad, op
 
@@ -80,7 +87,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self.data).__name__}: op = <{self.op.arg}>: [shape = {self.shape}, strides = {self.data.strides}]>"
+    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -259,7 +266,7 @@ class tensor:
     def _toposort(s): 
       if s not in vis: 
         vis.append(s)
-        if not isinstance(s.op, ops.LOAD):
+        if s.op != LoadOPS.LOAD:
           for child in s.op.saved: 
             _toposort(child)
           topo.append(s)
@@ -326,22 +333,6 @@ class tensor:
     if reduction=='sum': 
       return -self.logsoftmax(axis=1).mul(y).sum(axis=1).sum()
     return self.logsoftmax(axis=1).mul(y).sum(axis=1,keepdim=True).mean()
-  
-  # contain bufferID, bufferSHAPE, savedBuffers if not None
-  def get_buffers(self) -> Tuple: 
-    assert LAZY, "cannot get buffers without lazy evaluation enabled"
-    cache, loads = [], []
-    for s in self.toposort():
-      for i in s.op.saved:
-        if type(i.op) == ops.LOAD:
-          loads.append((hex(id(i)), i.shape, i.data.op, i))
-      _saved = tuple([hex(id(f)) for f in s.op.saved])
-      if isinstance(s.data, LazyBuffer): 
-        s.data.data = np.zeros(s.shape, dtype=np.float32)
-      _reg = (hex(id(s)), s.shape, s.data.op, s) + _saved
-      cache.append(_reg)
-    return loads + cache
-
   
   # need to find way to return function arguments and preserve cache ordering
   # for example 

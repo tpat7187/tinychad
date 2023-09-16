@@ -1,7 +1,8 @@
 from __future__ import annotations
 import numpy as np 
 from typing import Union, Tuple, Optional, List
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
+from tinychad.llvm import LLVMCodegen
 
 op_map = { 
     BinaryOPS.ADD   : lambda x, y: np.add(x,y),
@@ -26,8 +27,8 @@ op_map = {
 }
 
 class Buffer: 
-    __slots__ = "data", "shape", "strides"
-    def __init__(self, data:Union[np.ndarray, list, float, np.float32]):
+    __slots__ = "data", "shape", "strides", "op"
+    def __init__(self, data:Union[np.ndarray, list, float, np.float32], op):
         if isinstance(data, np.ndarray):
             self.data = data
 
@@ -37,6 +38,7 @@ class Buffer:
         if isinstance(data, list):
             self.data = np.array(data, dtype=np.float32)
         
+        self.op = op
         self.shape = self.data.shape
         self.strides = ViewTracker.generate_strides(self.shape)
 
@@ -76,8 +78,8 @@ class Buffer:
 
 # new lazy buffer
 class LazyBuffer: 
-    __slots__ = "shape", "op", "children", "data", "ctx", "strides"
-    def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
+    __slots__ = "shape", "op", "children", "data", "ctx", "strides", "backend"
+    def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None, backend=None): 
         self.shape, self.op, self.children = shape, op, children
         self.ctx = ctx
         if data is None: 
@@ -90,6 +92,7 @@ class LazyBuffer:
             self.data = np.array(data, dtype=np.float32)
 
         self.strides = ViewTracker.generate_strides(shape)
+        self.backend = backend
 
     @property 
     def dtype(self): return np.float32
@@ -107,6 +110,7 @@ class LazyBuffer:
     def realized(self:LazyBuffer) -> bool: return self.data is not None
 
     def exec(self:LazyBuffer) -> Buffer:
+      if self.backend in Interpreted:
         for f in self.children:
            if not f.realized(): f.exec()
         if self.op in (BinaryOPS or UnaryOPS):
@@ -117,7 +121,38 @@ class LazyBuffer:
         elif self.op in ReshapeOPS:
             args = self.ctx
             s = op_map[self.op](self.data, args)
-        return Buffer(s)
+        return Buffer(s, self.op)
+      else: 
+        codegen = LLVMCodegen(self.get_buffers())
+        codegen.compile()
+
+        return Buffer(self.data, self.op)
+
+    def toposort(self) -> Tuple[LazyBuffer, ...]: 
+      topo, vis = [], []
+      def _toposort(s: Buffer):
+        if s not in vis: 
+          vis.append(s)
+          if s.op != LoadOPS.LOAD:
+            for child in s.children: 
+              _toposort(child)
+            topo.append(s)
+      _toposort(self)
+      return topo
+
+    def get_buffers(self) -> Tuple: 
+      cache, loads = [], []
+      for s in self.toposort():
+        for i in s.children:
+          if i.op == LoadOPS.LOAD:
+            loads.append((hex(id(i)), i.shape, i.op, i))
+        _saved = tuple([hex(id(f)) for f in s.children])
+        if isinstance(s, LazyBuffer): 
+          s.data = np.zeros(s.shape, dtype=np.float32)
+        _reg = (hex(id(s)), s.shape, s.op, s) + _saved
+        cache.append(_reg)
+      return loads + cache
+
 
 # this may just be a LazyBuffer with a different codegen module
 class GPUBuffer: 

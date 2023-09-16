@@ -5,3 +5,6 @@ class BinaryOPS(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); M
 class ShapeOPS(Enum): MAX = auto(); SUM = auto();
 class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); TRANSPOSE = auto(); CAST = auto();
 class LoadOPS(Enum): LOAD = auto();
+
+class Interpreted(Enum): CPU = auto(); 
+class Compiled(Enum): LLVM = auto(); CUDA = auto(); 

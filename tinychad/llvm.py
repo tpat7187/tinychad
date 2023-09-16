@@ -2,8 +2,7 @@ import numpy as np
 import llvmlite.ir as ir
 import llvmlite.binding as llvm
 from typing import Union, Tuple, List, Optional
-import tinychad.ops as ops
-from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, LoadOPS
 import os
 from ctypes import c_void_p, CFUNCTYPE
 import ctypes
@@ -33,7 +32,7 @@ class LLVMCodegen:
     self.loaded=0
 
     self.args = self.main.args
-    self._bufs_ptr = [j.data.ctypes.data_as(c_void_p) for j in self._bufs]
+    self._bufs_ptr = [j.ctypes.data_as(c_void_p) for j in self._bufs]
     self.generated_fxns = {}
 
     self.op_map = {
@@ -57,15 +56,15 @@ class LLVMCodegen:
   @classmethod
   def generate_kernel_name(self, token) -> str:
     if token[2] == BinaryOPS.MATMUL:
-      in_shape1, in_shape2 = token[3].op.saved[0].shape, token[3].op.saved[1].shape
+      in_shape1, in_shape2 = token[3].children[0].shape, token[3].children[1].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape1])}{''.join(['_' + str(j) for j in in_shape2])}"
       return fxn_name
     elif token[2] in BinaryOPS or token[2] in UnaryOPS:
-      in_shape = token[3].op.saved[0].shape
+      in_shape = token[3].children[0].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}"
       return fxn_name
     elif token[2] in ShapeOPS: 
-      in_shape, axis = token[3].op.saved[0].shape, token[3].op.ctx
+      in_shape, axis = token[3].children[0].shape, token[3].ctx
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{'_' + str(axis[0]) if axis[0] is not None else ''}"
       return fxn_name
     else:
@@ -87,9 +86,9 @@ class LLVMCodegen:
       for j in range(len(self._cache)):
         tt[s[j]] = self.args[j]
     for i, j in enumerate(self._cache):
-      if type(j[2]) == ops.LOAD:
+      if j[2] == LoadOPS.LOAD:
         if PORT:
-          byte_string = list(j[3].detach().tobytes())
+          byte_string = list(j[3].data.tobytes())
           tt[j[0]] = self.load_buffer(byte_string, self.loaded)
       else:
         fxn_name = LLVMCodegen.generate_kernel_name(j)
@@ -103,7 +102,7 @@ class LLVMCodegen:
           elif j[2] in BinaryOPS or j[2] in UnaryOPS:
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
-            args = j[3].op.ctx
+            args = j[3].ctx
             self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
           elif j[2] in ReshapeOPS: 
             reshape_op_helpers[j[2]](j[2], j[3], output_arg, input_args, fxn_name)
@@ -211,7 +210,7 @@ class LLVMCodegen:
 
   # sum/max, axis is a accumulate with a stride
   def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name): 
-    in_shape, strides, axis = shapes.op.saved[0].shape, shapes.op.saved[0].strides, args[0]
+    in_shape, strides, axis = shapes.children[0].shape, shapes.children[0].strides, args[0]
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     blocked = True if axis and 0 < axis < len(in_shape)-1 else False
@@ -306,7 +305,7 @@ class LLVMCodegen:
   # for now we should support only one axis broadcasting at a time (5,1,1) -> (5,5,5) is a little harder
   # we assume that the shapes are of the same dim
   def _cast(self, op, shapes, output_arg, input_args, fxn_name):
-    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    in_shape, out_shape = shapes.children[0].shape, shapes.shape
     axis = [i for i, (a, b) in enumerate(zip(out_shape, in_shape)) if a != b][0]
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
