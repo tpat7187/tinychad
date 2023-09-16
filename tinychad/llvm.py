@@ -118,10 +118,6 @@ class LLVMCodegen:
     self.parse_cache()
     self.buffer_builder.branch(self.main_block)
     self.main_builder.branch(self.out_block)
-  
-    # to compile wasm emcc test.bc -s WASM=1 -s EXPORTED_FUNCTIONS=["_malloc, _main, _free"] -o test.js
-    #self.mod.triple = "wasm32-unknown-unknown"
-    #self.mod.data_layout ="e-m:e-p:32:32-i64:64-n32:64-S128"
 
     input_ir = self.mod
     llvm.initialize()
@@ -224,9 +220,18 @@ class LLVMCodegen:
   # loop 2: idx0, idx0+stride
   # IF 0 < axis < len(in_shape) we are going to have a block_stride > 1
 
+  # shape (5,5,5,5) 
+  # strides(1,5,25,125)
+
+  # axis=0, mul 1, add 125
+  # axis=1, mul 125, add gidx1, add 25 [2 loops]
+  # axis=2, mul 25, add gidx1, add 5 [2 loops]
+  # axis=3 mul 5, add 1
+
   # if stride AND block_stride > 1 NEED new loop
   # stride and block_stride function
 
+  # can probably remove these because we will use the viewtracker
   @staticmethod
   def get_strides(shape, axis):
     stride = 1
@@ -240,79 +245,59 @@ class LLVMCodegen:
     if axis and 0 < axis < len(shape)-1: return stride * shape[axis]
     else: return None
 
-
-  # args[1] is keepdim, this doesn't really matter as far as memory patterns are concerned
-  def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name):
-    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
-    stride = LLVMCodegen.get_strides(in_shape, args[0])
-    block_stride = LLVMCodegen.get_block_stride(in_shape, args[0], stride)
+  def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name): 
+    in_shape, out_shape, strides, axis = shapes.op.saved[0].shape, shapes.shape, shapes.strides, args[0]
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
-    inp_block = fxn.append_basic_block(name = 'entry')
-    block_size = in_shape[args[0]] if args[0] != None else np.prod(in_shape)
-    if block_stride: 
-      global_block = fxn.append_basic_block(name='globalidx')
-      global_builder = ir.IRBuilder(global_block)
-    local_block = fxn.append_basic_block(name='localidx')
-    local_builder = ir.IRBuilder(local_block)
-    inp_builder = ir.IRBuilder(inp_block)
-    # TODO: setup global idx
-    if block_stride:
-      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), block_size)
-      global_block_exit = fxn.append_basic_block(name='globalidx_exit')
-      global_builder_exit = ir.IRBuilder(global_block_exit)
-      global_idx = global_builder.phi(ir.IntType(32))
-      inp_builder.branch(global_block)
-      global_builder.branch(local_block)
-    else:
-      inp_builder.branch(local_block)
-    
+    blocked = True if axis and 0 < axis < len(in_shape)-1 else False
+    inp_block, local_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block("local_idx")
+    inp_builder, local_builder = ir.IRBuilder(inp_block), ir.IRBuilder(local_block)
+    local_idx = local_builder.phi(ir.IntType(32), name = 'lidx')
+    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[0])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
     out_block = fxn.append_basic_block(name = 'out')
     out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
-
-    # local_e needs to change depending on the size of the block
-    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), block_stride if block_stride else np.prod(out_shape))
-    local_idx = local_builder.phi(ir.IntType(32))
-    indx, cache = local_idx, []
-    if block_stride:
+    if blocked: 
+      global_block = fxn.insert_basic_block(before=1,name='global_idx')
+      global_builder = ir.IRBuilder(global_block)
+      global_idx = global_builder.phi(ir.IntType(32), name = 'gidx')
+      global_block_exit = fxn.insert_basic_block(before=3, name='globalidx_exit')
+      global_builder_exit = ir.IRBuilder(global_block_exit)
+      global_builder.branch(local_block)
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), strides[axis])
       local_idx.add_incoming(local_s, global_block)
       global_idx.add_incoming(global_s, inp_block)
-      block_stride_idx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), block_stride))
-      indx = local_builder.add(local_idx, block_stride_idx)
+      inp_builder.branch(global_block)
     else:
+      inp_builder.branch(local_block)
       local_idx.add_incoming(local_s, inp_block)
-    for x in range(block_size):
-      if stride == 1: 
-        indx = local_builder.mul(local_idx, ir.Constant(ir.IntType(32), block_size))
-        indx = local_builder.add(indx, ir.Constant(ir.IntType(32), x))
-        av = local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True))
+
+    cache = []
+    for x in range(in_shape[axis] if axis != None else np.prod(in_shape)):
+      if axis == 0: 
+        indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*strides[-1]))
       else:
-        av = local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True))
-        indx = local_builder.add(indx, ir.Constant(ir.IntType(32), stride))
-      cache.append(av)
+        indx = local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis-1] if axis > 0 else 1)), local_idx if blocked else ir.Constant(ir.IntType(32), x))
+        if blocked: 
+          indx = local_builder.add(indx, ir.Constant(ir.IntType(32), strides[::-1][axis]*x))
+      cache.append(local_builder.load(local_builder.gep(fxn.args[0], [indx], inbounds=True)))
+
     out = cache[0]
     out = local_builder.fadd(out, ir.Constant(ir.FloatType(), 0))
     for i in range(1, len(cache)):
       out = self.op_map[op](local_builder, cache[i], out)
-    if block_stride: 
-      store_idx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), stride))
-      store_idx = local_builder.add(store_idx, local_idx)
-      local_e_ptr = local_builder.gep(fxn.args[1], [store_idx], inbounds=True)
-    else:
-      local_e_ptr = local_builder.gep(fxn.args[1], [local_idx], inbounds=True)
 
-    local_builder.store(out, local_e_ptr)
-    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
+    store_idx = local_builder.gep(fxn.args[1], [local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis])), local_idx)]) if blocked else local_builder.gep(fxn.args[1], [local_idx])
+    local_builder.store(out, store_idx)
+    local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32),1))
     local_idx.add_incoming(local_e_n, local_block)
-    if block_stride:
-      # local loop should not be terminating on global_e
-      local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit, local_block)
-      global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32), 1))
+    local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), global_block_exit if blocked else out_block, local_block)
+
+    if blocked: 
+      global_e_n = global_builder_exit.add(global_idx, ir.Constant(ir.IntType(32),1))
       global_idx.add_incoming(global_e_n, global_block_exit)
       global_builder_exit.cbranch(global_builder_exit.icmp_unsigned("==", global_e_n, global_e), out_block, global_block)
-    else:
-      local_builder.cbranch(local_builder.icmp_unsigned("==", local_e_n, local_e), out_block, local_block)
+
     self.generated_fxns[fxn.name] = fxn
     self.main_builder.call(fxn, (*input_args, output_arg))
 
