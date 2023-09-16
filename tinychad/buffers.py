@@ -127,10 +127,10 @@ class GPUBuffer:
 class ViewTracker: 
   @classmethod 
   def generate_strides(self, shape): 
-    strides = [1]
-    for j in shape[::-1][:-1]: 
-       strides = [j*strides[0]] + strides
-    return tuple(reversed(strides))
+    strides, shape = [1], shape[::-1]
+    for x in range(0, len(shape)-1): 
+      strides.append(shape[x] * strides[-1])
+    return tuple(strides)
 
   @classmethod
   def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:LazyBuffer, **kwargs) -> Tuple[int, ...]:
