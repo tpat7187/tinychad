@@ -246,14 +246,14 @@ class LLVMCodegen:
     else: return None
 
   def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name): 
-    in_shape, out_shape, strides, axis = shapes.op.saved[0].shape, shapes.shape, shapes.strides, args[0]
+    in_shape, out_shape, strides, axis = shapes.op.saved[0].shape, shapes.shape, shapes.op.saved[0].strides, args[0]
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     blocked = True if axis and 0 < axis < len(in_shape)-1 else False
     inp_block, local_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block("local_idx")
     inp_builder, local_builder = ir.IRBuilder(inp_block), ir.IRBuilder(local_block)
     local_idx = local_builder.phi(ir.IntType(32), name = 'lidx')
-    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[0])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
+    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[axis])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
     out_block = fxn.append_basic_block(name = 'out')
     out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
@@ -264,7 +264,7 @@ class LLVMCodegen:
       global_block_exit = fxn.insert_basic_block(before=3, name='globalidx_exit')
       global_builder_exit = ir.IRBuilder(global_block_exit)
       global_builder.branch(local_block)
-      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), strides[axis])
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), in_shape[axis-1])
       local_idx.add_incoming(local_s, global_block)
       global_idx.add_incoming(global_s, inp_block)
       inp_builder.branch(global_block)
@@ -275,7 +275,7 @@ class LLVMCodegen:
     cache = []
     for x in range(in_shape[axis] if axis != None else np.prod(in_shape)):
       if axis == 0: 
-        indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*strides[-1]))
+        indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*strides[::-1][axis]))
       else:
         indx = local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis-1] if axis > 0 else 1)), local_idx if blocked else ir.Constant(ir.IntType(32), x))
         if blocked: 
