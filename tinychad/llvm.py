@@ -13,9 +13,6 @@ arr_t = ir.PointerType(ir.FloatType())
 
 PORT = os.getenv("PORT", 0)
 
-# to run on device need output buffer
-# to run portable need input and output buffer
-
 class LLVMCodegen: 
   def __init__(self, _cache): 
     _bufs = [j[3].data for j in _cache]
@@ -38,8 +35,7 @@ class LLVMCodegen:
     self.args = self.main.args
     self._bufs_ptr = [j.data.ctypes.data_as(c_void_p) for j in self._bufs]
     self.generated_fxns = {}
-    # llvm.fma intrinsic can perform fused multiply add, this may be useful for writing matmul kernel 
-    # supposedly there is an intrinsic function already for matmuls
+
     self.op_map = {
       BinaryOPS.ADD : lambda builder, x, y: builder.fadd(x,y),
       BinaryOPS.SUB : lambda builder, x, y: builder.fsub(x,y),
@@ -76,9 +72,16 @@ class LLVMCodegen:
       in_shape, out_shape = token[3].op.saved[0].shape, token[3].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{''.join(['_' + str(j) for j in out_shape])}"
       return fxn_name
-      
 
   def parse_cache(self): 
+    reshape_op_helpers = { 
+      ReshapeOPS.RESHAPE: self._reshape,
+      ReshapeOPS.SLICE: self._slice,
+      ReshapeOPS.TRANSPOSE: self._transpose,
+      ReshapeOPS.PAD: self._pad,
+      ReshapeOPS.CAST: self._cast,
+    }
+
     s, tt = [j[0] for j in self._cache], {}
     if not PORT:
       for j in range(len(self._cache)):
@@ -91,28 +94,20 @@ class LLVMCodegen:
       else:
         fxn_name = LLVMCodegen.generate_kernel_name(j)
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
-        output_arg = tt[j[0]]
+        output_arg = tt[j[0]] =  self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
         if fxn_name in self.generated_fxns:
-          output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
           self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
         else:
           if j[2] == BinaryOPS.MATMUL: 
-            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self.llvm_matmul(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in BinaryOPS or j[2] in UnaryOPS:
-            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
-            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             args = j[3].op.ctx
             self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
-          elif j[2] == ReshapeOPS.CAST: 
-            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
-            self._cast(j[2], j[3], output_arg, input_args, fxn_name)
-          elif j[2] == ReshapeOPS.RESHAPE:
-            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
-            self._reshape(j[2], j[3], output_arg, input_args, fxn_name)
-        
+          elif j[2] in ReshapeOPS: 
+            reshape_op_helpers[j[2]](j[2], j[3], output_arg, input_args, fxn_name)
+
 
   def compile(self): 
     self.parse_cache()
@@ -125,10 +120,6 @@ class LLVMCodegen:
     llvm.initialize_native_asmprinter()
     llvm_ir = str(input_ir)
 
-    content = open('test.ll', 'w')
-    content.write(llvm_ir)
-    content.close()
-
     target = llvm.Target.from_default_triple()
     target_machine = target.create_target_machine()
     backing_mod = llvm.parse_assembly("") 
@@ -137,9 +128,18 @@ class LLVMCodegen:
     engine.add_module(mod)
     engine.finalize_object()
     engine.run_static_constructors()
-    main_ptr = engine.get_function_address("main")
-    cfunc = CFUNCTYPE(None, *[c_void_p for j in self._cache])(main_ptr)
-    cfunc(*self._bufs_ptr)
+
+    if PORT: 
+      # wasm data layout and triple
+      self.mod.triple = "wasm32-unknown-unknown"
+      self.mod.data_layout ="e-m:e-p:32:32-i64:64-n32:64-S128"
+      content = open('test.ll', 'w')
+      content.write(llvm_ir)
+      content.close()
+    else:
+      main_ptr = engine.get_function_address("main")
+      cfunc = CFUNCTYPE(None, *[c_void_p for j in self._cache])(main_ptr)
+      cfunc(*self._bufs_ptr)
 
   # unary + binary sans MATMUL
   # there has to be a way to do some fusing for the codegen
@@ -210,43 +210,8 @@ class LLVMCodegen:
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   # sum/max, axis is a accumulate with a stride
-  # [1,2,3,4,5,6] (2,3) axis = 0 -> [1+4], [2+5], [3+6], 3 blocks 2 elements
-  # [1,2,3,4,5,6] (2,3) axis = 1 -> [1+2+3], [4+5+6], 2 blocks 3 elements
-  # if the stride changes between blocks we need to introduce another loop
-  # EG:  [0,1,2,3,4,5,6,7] axis=0 -> [0,4]->(1)->[1,5]->(1)->[2,6]->(1)->[3,7] stride=4, block stride=1
-  # EG2: [0,1,2,3,4,5,6,7] axis=1 -> [0,2]->(1)->[1,3]->(3)->[4,6]->(1)->[5,7] stride=2, block stride=(1,3)
-  # EG3: [0,1,2,3,4,5,6,7] axis=2 -> [0,1]->(2)->[2,3]->(2)->[4,5]->(2)->[6,7] stride=1, block stride=2
-  # loop 1: idx0, idx0*3 
-  # loop 2: idx0, idx0+stride
-  # IF 0 < axis < len(in_shape) we are going to have a block_stride > 1
-
-  # shape (5,5,5,5) 
-  # strides(1,5,25,125)
-
-  # axis=0, mul 1, add 125
-  # axis=1, mul 125, add gidx1, add 25 [2 loops]
-  # axis=2, mul 25, add gidx1, add 5 [2 loops]
-  # axis=3 mul 5, add 1
-
-  # if stride AND block_stride > 1 NEED new loop
-  # stride and block_stride function
-
-  # can probably remove these because we will use the viewtracker
-  @staticmethod
-  def get_strides(shape, axis):
-    stride = 1
-    if axis == None: return stride
-    for i in range(axis+1, len(shape)):
-        stride *= shape[i]
-    return stride
-
-  @staticmethod 
-  def get_block_stride(shape, axis, stride):
-    if axis and 0 < axis < len(shape)-1: return stride * shape[axis]
-    else: return None
-
   def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name): 
-    in_shape, out_shape, strides, axis = shapes.op.saved[0].shape, shapes.shape, shapes.op.saved[0].strides, args[0]
+    in_shape, strides, axis = shapes.op.saved[0].shape, shapes.op.saved[0].strides, args[0]
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     blocked = True if axis and 0 < axis < len(in_shape)-1 else False
@@ -257,18 +222,16 @@ class LLVMCodegen:
     if axis == None: 
       local_e = ir.Constant(ir.IntType(32), 1)
     else:
-      local_e = ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[axis])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
+      local_e = ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[axis])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis] if axis is not None else 1)
     out_block = fxn.append_basic_block(name = 'out')
     out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
     if blocked: 
-      global_block = fxn.insert_basic_block(before=1,name='global_idx')
-      global_builder = ir.IRBuilder(global_block)
+      global_block, global_block_exit = fxn.insert_basic_block(before=1,name='global_idx'), fxn.insert_basic_block(before=3, name='globalidx_exit')
+      global_builder, global_builder_exit = ir.IRBuilder(global_block), ir.IRBuilder(global_block_exit)
       global_idx = global_builder.phi(ir.IntType(32), name = 'gidx')
-      global_block_exit = fxn.insert_basic_block(before=3, name='globalidx_exit')
-      global_builder_exit = ir.IRBuilder(global_block_exit)
       global_builder.branch(local_block)
-      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), in_shape[axis-1])
+      global_s, global_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(in_shape) // strides[axis])
       local_idx.add_incoming(local_s, global_block)
       global_idx.add_incoming(global_s, inp_block)
       inp_builder.branch(global_block)
