@@ -4,17 +4,23 @@ import llvmlite.binding as llvm
 from typing import Union, Tuple, List, Optional
 import tinychad.ops as ops
 from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS
+import os
 from ctypes import c_void_p, CFUNCTYPE
 import ctypes
 
 void_t = ir.VoidType()
 arr_t = ir.PointerType(ir.FloatType())
 
+PORT = os.getenv("PORT", 0)
+
+# to run on device need output buffer
+# to run portable need input and output buffer
+
 class LLVMCodegen: 
   def __init__(self, _cache): 
     _bufs = [j[3].data for j in _cache]
     self._cache, self.mod, self._bufs = _cache, ir.Module(), _bufs
-    self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))])
+    self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))]) if not PORT else ir.FunctionType(void_t, [arr_t, arr_t])
     self.main = ir.Function(self.mod, self.fun_t, name = 'main')
 
     self.buffer_block  = self.main.append_basic_block(name = 'buffers')
@@ -26,7 +32,6 @@ class LLVMCodegen:
     self.out_block  = self.main.append_basic_block(name = 'exit')
     self.out_builder = ir.IRBuilder(self.out_block)
     self.out_builder.ret_void()
-
 
     self.loaded=0
 
@@ -74,34 +79,38 @@ class LLVMCodegen:
       
 
   def parse_cache(self): 
-    tt = {}
+    s, tt = [j[0] for j in self._cache], {}
+    if not PORT:
+      for j in range(len(self._cache)):
+        tt[s[j]] = self.args[j]
     for i, j in enumerate(self._cache):
       if type(j[2]) == ops.LOAD:
-        byte_string = list(j[3].detach().tobytes())
-        tt[j[0]] = self.load_buffer(byte_string, self.loaded)
+        if PORT:
+          byte_string = list(j[3].detach().tobytes())
+          tt[j[0]] = self.load_buffer(byte_string, self.loaded)
       else:
         fxn_name = LLVMCodegen.generate_kernel_name(j)
         input_args = [tt[j[4]], tt[j[5]]] if len(j) == 6 else [tt[j[4]]]
-
+        output_arg = tt[j[0]]
         if fxn_name in self.generated_fxns:
-          output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+          output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
           self.main_builder.call(self.generated_fxns[fxn_name], (*input_args, output_arg))
         else:
           if j[2] == BinaryOPS.MATMUL: 
-            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self.llvm_matmul(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in BinaryOPS or j[2] in UnaryOPS:
-            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
-            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             args = j[3].op.ctx
             self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
           elif j[2] == ReshapeOPS.CAST: 
-            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self._cast(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] == ReshapeOPS.RESHAPE:
-            output_arg = tt[j[0]] = self.create_buffer(j[3].shape, self.loaded)
+            output_arg = self.create_buffer(j[3].shape, self.loaded) if PORT else tt[j[0]]
             self._reshape(j[2], j[3], output_arg, input_args, fxn_name)
         
 

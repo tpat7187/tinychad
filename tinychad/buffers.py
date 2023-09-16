@@ -26,7 +26,7 @@ op_map = {
 }
 
 class Buffer: 
-    __slots__ = "data", "shape"
+    __slots__ = "data", "shape", "strides"
     def __init__(self, data:Union[np.ndarray, list, float, np.float32]):
         if isinstance(data, np.ndarray):
             self.data = data
@@ -38,6 +38,7 @@ class Buffer:
             self.data = np.array(data, dtype=np.float32)
         
         self.shape = self.data.shape
+        self.strides = ViewTracker.generate_strides(self.shape)
 
     def __repr__(self): return f"{self.shape} Buffer"
 
@@ -75,7 +76,7 @@ class Buffer:
 
 # new lazy buffer
 class LazyBuffer: 
-    __slots__ = "shape", "op", "children", "data", "ctx"
+    __slots__ = "shape", "op", "children", "data", "ctx", "strides"
     def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
         self.shape, self.op, self.children = shape, op, children
         self.ctx = ctx
@@ -87,6 +88,8 @@ class LazyBuffer:
             self.data = np.array([data], dtype=np.float32)
         elif isinstance(data, list):
             self.data = np.array(data, dtype=np.float32)
+
+        self.strides = ViewTracker.generate_strides(shape)
 
     @property 
     def dtype(self): return np.float32
@@ -122,6 +125,14 @@ class GPUBuffer:
         pass
 
 class ViewTracker: 
+  @classmethod 
+  def generate_strides(self, shape): 
+    stride = [1]
+    for x in reversed(shape[1:]):
+      stride.append(x*np.prod(stride))
+    stride.append(np.prod(shape))
+    return tuple(stride)
+
   @classmethod
   def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:LazyBuffer, **kwargs) -> Tuple[int, ...]:
     ReshapeOPHelpers = {

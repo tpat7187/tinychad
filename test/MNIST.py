@@ -38,14 +38,14 @@ def train(model, optim, xtrain, ytrain):
     out = model.forward(tensor(inp))
     res = tensor(ytrain[ind])
     loss = out.NLLLoss(res)
-    cat = np.argmax(out.data.dat, axis=1)
+    cat = np.argmax(out.detach(), axis=1)
     acc = np.sum(cat == ytrain[ind])
 
     optim.zero_grad()
     loss.backward()
     optim.step()
 
-    t.set_description("loss %.6f acc %.2f" % (loss.data.dat, acc / BS))
+    t.set_description("loss %.6f acc %.2f" % (loss.detach(), acc / BS))
 
 train(model, optim, xtrain, ytrain)
 

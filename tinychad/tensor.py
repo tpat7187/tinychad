@@ -4,7 +4,7 @@ import os
 import time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, LazyBuffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 
 
 DEBUG = os.getenv("DEBUG") 
@@ -71,19 +71,19 @@ class tensor:
   def shape(self) -> tuple[int, ...]: return self.data.shape
 
   @property
+  def strides(self) -> tuple[int, ...]: return self.data.strides
+
+  @property
   def dtype(self): return self.data.dtype
 
   @property
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"{type(self.data).__name__}: op = <{self.op.arg}>: shape = {self.shape}"
+    return f"<{type(self.data).__name__}: op = <{self.op.arg}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
-
-  def __dict__(self): 
-    return {'requires_grad' : self.requires_grad, 'shape' : self.shape}
 
   def __add__(self, x): return self.add(x)
   def __sub__(self,x): return self.sub(x)
@@ -120,7 +120,7 @@ class tensor:
   def max(self, axis=None, keepdim=False): return ops.MAX.apply(self, axis=axis, keepdim=keepdim)
   def sum(self, axis=None, keepdim=False): return ops.SUM.apply(self, axis=axis, keepdim=keepdim)
 
-  # reshape ops (changes shape, content does not change, sparse -> circular matrix for conv)
+  # reshape ops (changes shape, content does not change)
   def reshape(self, *args) : return self.reshape_op(ops.RESHAPE, args = args)
   def slice(self, *args) : return self.reshape_op(ops.SLICE, args = args)
   def pad(self, args) : return self.reshape_op(ops.PAD, args = args)
@@ -400,7 +400,6 @@ class BatchNorm2d:
       self.b = tensor.zeros((num_features))
     else:
       self.w, self.b = None, None
-    # the get_params is gonna grab this if we keep them as tensors
     self.running_mean = np.zeros(num_features)
     self.running_var = np.zeros(num_features)
 
@@ -411,8 +410,8 @@ class BatchNorm2d:
     b_invstd = b_var.add(self.eps).sqrt()
 
     if self.track:
-      self.running_mean = (1.0 - self.momentum) * self.running_mean + self.momentum #.mul(currentmean)
-      self.running_var = (1.0 - self.momentum) * self.running_var + self.momentum #.mul(currentvar)
+      self.running_mean = (1.0 - self.momentum) * self.running_mean + self.momentum
+      self.running_var = (1.0 - self.momentum) * self.running_var + self.momentum 
 
     return x.batchnorm2d(self.w, self.b, b_mean, b_invstd)
 
