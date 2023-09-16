@@ -253,7 +253,11 @@ class LLVMCodegen:
     inp_block, local_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block("local_idx")
     inp_builder, local_builder = ir.IRBuilder(inp_block), ir.IRBuilder(local_block)
     local_idx = local_builder.phi(ir.IntType(32), name = 'lidx')
-    local_s, local_e = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[axis])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
+    local_s = ir.Constant(ir.IntType(32), 0)
+    if axis == None: 
+      local_e = ir.Constant(ir.IntType(32), 1)
+    else:
+      local_e = ir.Constant(ir.IntType(32), (np.prod(in_shape) // in_shape[axis])) if not blocked else ir.Constant(ir.IntType(32), strides[::-1][axis])
     out_block = fxn.append_basic_block(name = 'out')
     out_builder = ir.IRBuilder(out_block)
     out_builder.ret_void()
@@ -274,9 +278,11 @@ class LLVMCodegen:
 
     cache = []
     for x in range(in_shape[axis] if axis != None else np.prod(in_shape)):
-      if axis == 0: 
+      if axis == None:
+        indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x))
+      elif axis == 0: 
         indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*strides[::-1][axis]))
-      else:
+      elif axis > 0:
         indx = local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis-1] if axis > 0 else 1)), local_idx if blocked else ir.Constant(ir.IntType(32), x))
         if blocked: 
           indx = local_builder.add(indx, ir.Constant(ir.IntType(32), strides[::-1][axis]*x))
