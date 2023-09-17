@@ -165,7 +165,8 @@ class ViewTracker:
     strides, shape = [1], shape[::-1]
     for x in range(0, len(shape)-1): 
       strides.append(shape[x] * strides[-1])
-    return tuple(strides)
+    strides = tuple(strd if shp != 1 else 1 for strd, shp in zip(strides, list(shape)))
+    return strides
 
   @classmethod
   def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:LazyBuffer, **kwargs) -> Tuple[int, ...]:

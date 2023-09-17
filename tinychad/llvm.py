@@ -15,12 +15,15 @@ PORT = os.getenv("PORT", 0)
 class LLVMCodegen: 
   def __init__(self, _cache): 
     _bufs = [j[3].data for j in _cache]
-    self._cache, self.mod, self._bufs = _cache, ir.Module(), _bufs
+    self._cache, self.mod, self._bufs = _cache, ir.Module(name=__file__), _bufs
     self.fun_t = ir.FunctionType(void_t, [arr_t for _ in range(len(self._bufs))]) if not PORT else ir.FunctionType(void_t, [arr_t, arr_t])
     self.main = ir.Function(self.mod, self.fun_t, name = 'main')
 
     self.buffer_block  = self.main.append_basic_block(name = 'buffers')
     self.buffer_builder = ir.IRBuilder(self.buffer_block)
+
+    self.main.attributes._known = self.main.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
+    self.main.attributes.add('"no-nans-fp-math"="true"')
 
     self.main_block  = self.main.append_basic_block(name = 'main')
     self.main_builder = ir.IRBuilder(self.main_block)
@@ -103,7 +106,10 @@ class LLVMCodegen:
             self.elementwise_op(j[2], j[3], output_arg, input_args, fxn_name)
           elif j[2] in ShapeOPS:
             args = j[3].ctx
-            self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
+            if j[3].children[0].shape[args[0]] == 1: 
+              self._reshape(j[2], j[3], output_arg, input_args, fxn_name)
+            else:
+              self.shape_op(j[2], j[3], output_arg, input_args, args, fxn_name)
           elif j[2] in ReshapeOPS: 
             reshape_op_helpers[j[2]](j[2], j[3], output_arg, input_args, fxn_name)
 
@@ -209,6 +215,8 @@ class LLVMCodegen:
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   # sum/max, axis is a accumulate with a stride
+  # if an axis-1 == 1 OR axis=1 it makes mistakes, if we sum on axis=1 we simply reshape the axis out
+  # if sum shape (5,1,5) on 2 the correct answer comes from summing (5,5) with a reshape into (5,1,5), our axis-1 will hit a 1
   def shape_op(self, op, shapes, output_arg, input_args, args, fxn_name): 
     in_shape, strides, axis = shapes.children[0].shape, shapes.children[0].strides, args[0]
     fxn_type = ir.FunctionType(void_t, [arr_t, arr_t])
@@ -344,6 +352,7 @@ class LLVMCodegen:
     pass
 
   # this should just be a simple elementwise copy
+  # can we make this zero copy? 
   def _reshape(self, op, shapes, output_arg, input_args, fxn_name):
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
