@@ -9,11 +9,12 @@ goals:
 TODO: 
   * computation graph
   * LLVM/MLIR backend
-    * may still be value in tinychad -> MLIR -> LLVM IR -> WASM
     * MNIST IN THE WEB
   * update training/testing
     * batchnorm2d passing tests
   * state dict for transfer learning
+  * GPU backend
+    * pycuda vs CUDA from toolkit testing
 
 ## how to chad
 tinychad is like pytorch but slower but also significantly smaller
@@ -51,6 +52,38 @@ w.exec() # to execute the cache
 w.get_buffers() # to return the list of unique buffers and shapes needed for the output to be realized
 ```
 
+tinychad can generate LLVM IR (execute with LLVM=1) 
+
+```python
+from tinychad.tensor import tensor, Linear
+
+x = tensor.randn(5,5).reshape(1, -1)
+l1 = Linear(25, 10)
+
+out = l1(x).exec() # execute cache with LLVM codegen
+```
+
+will return, to export the model run PORT=1 (this will load all the buffers into the code instead of reading the pointers from the LazyBuffers)
+
+```LLVM
+; ModuleID = ""
+target triple = "unknown-unknown-unknown"
+target datalayout = ""
+
+define void @"main"(float* %".1", float* %".2", float* %".3", float* %".4", float* %".5", float* %".6", float* %".7")
+{
+buffers:
+  br label %"main"
+main:
+  call void @"ReshapeOPS.RESHAPE_5_5_1_25"(float* %".1", float* %".4")
+  call void @"BinaryOPS.MATMUL_1_25_25_10"(float* %".4", float* %".2", float* %".5")
+  call void @"ReshapeOPS.RESHAPE_10_1_10"(float* %".3", float* %".6")
+  call void @"BinaryOPS.ADD_1_10"(float* %".5", float* %".6", float* %".7")
+  br label %"exit"
+exit:
+  ret void
+}
+```
 
 
 things to read: 
