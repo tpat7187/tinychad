@@ -136,9 +136,6 @@ class LLVMCodegen:
       content.write(llvm_ir)
       content.close()
     else:
-      content = open('test.ll', 'w')
-      content.write(llvm_ir)
-      content.close()
       main_ptr = engine.get_function_address("main")
       cfunc = CFUNCTYPE(None, *[c_void_p for j in self._cache])(main_ptr)
       cfunc(*self._bufs_ptr)
