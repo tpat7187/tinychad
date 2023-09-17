@@ -114,13 +114,13 @@ class LazyBuffer:
         for f in self.children:
            if not f.realized(): f.exec()
         if self.op in (BinaryOPS or UnaryOPS):
-            s = op_map[self.op](*[j.data for j in self.children])
+          s = op_map[self.op](*[j.data for j in self.children])
         elif self.op in ShapeOPS:
-            axis, keepdim = self.ctx
-            s = op_map[self.op](*[j.data for j in self.children], axis=axis, keepdims=keepdim)
+          axis, keepdim = self.ctx
+          s = op_map[self.op](*[j.data for j in self.children], axis=axis, keepdims=keepdim)
         elif self.op in ReshapeOPS:
-            args = self.ctx
-            s = op_map[self.op](self.data, args)
+          args = self.ctx
+          s = op_map[self.op](self.data, args)
         return Buffer(s, self.op)
       else: 
         codegen = LLVMCodegen(self.get_buffers())

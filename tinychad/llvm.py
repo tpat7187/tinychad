@@ -68,7 +68,7 @@ class LLVMCodegen:
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{'_' + str(axis[0]) if axis[0] is not None else ''}"
       return fxn_name
     else:
-      in_shape, out_shape = token[3].op.saved[0].shape, token[3].shape
+      in_shape, out_shape = token[3].children[0].shape, token[3].shape
       fxn_name = f"{str(token[2])}{''.join(['_' + str(j) for j in in_shape])}{''.join(['_' + str(j) for j in out_shape])}"
       return fxn_name
 
@@ -154,11 +154,11 @@ class LLVMCodegen:
     s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape)) #this is 1 too large?
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
-    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
+    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx], inbounds=True))
     inputs = [av]  
-    if num_in_buffers > 1: inputs.append(loop_builder.load(loop_builder.gep(fxn.args[1], [idx])))
+    if num_in_buffers > 1: inputs.append(loop_builder.load(loop_builder.gep(fxn.args[1], [idx], inbounds=True)))
 
-    out_ptr = loop_builder.gep(fxn.args[num_in_buffers], [idx])
+    out_ptr = loop_builder.gep(fxn.args[num_in_buffers], [idx], inbounds=True)
     loop_builder.store(self.op_map[op](loop_builder, *tuple(inputs)), out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
@@ -167,7 +167,7 @@ class LLVMCodegen:
     self.main_builder.call(fxn, (*input_args, output_arg))
 
   def llvm_matmul(self, op, shapes, output_arg, input_args, fxn_name):
-    in_shape, out_shape = shapes.op.saved[0].shape, shapes.shape
+    in_shape, out_shape = shapes.children[0].shape, shapes.shape
     fxn_type = ir.FunctionType(void_t, [arr_t for _ in range(1+len(input_args))])
     fxn = ir.Function(self.mod, fxn_type, name = fxn_name)
     inp_block, global_block, local_block, global_block_exit, out_block = fxn.append_basic_block(name = 'entry'), fxn.append_basic_block(name = 'globalidx'), fxn.append_basic_block('localidx'), fxn.append_basic_block('globalidx_edit'), fxn.append_basic_block(name = 'out')
@@ -183,19 +183,19 @@ class LLVMCodegen:
     for x in range(in_shape[1]): 
       g_indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), in_shape[1]))
       g_indx = local_builder.add(g_indx, ir.Constant(ir.IntType(32), x))
-      av.append(local_builder.load(local_builder.gep(fxn.args[0], [g_indx])))
+      av.append(local_builder.load(local_builder.gep(fxn.args[0], [g_indx], inbounds=True)))
 
     bv = []
     for x in range(in_shape[1]): 
       l_indx = local_builder.add(local_idx, ir.Constant(ir.IntType(32), x*out_shape[1]))
-      bv.append(local_builder.load(local_builder.gep(fxn.args[1], [l_indx])))
+      bv.append(local_builder.load(local_builder.gep(fxn.args[1], [l_indx], inbounds=True)))
 
     acc = ir.Constant(ir.FloatType(), 0.0)
     for i,j in zip(av, bv): 
       acc = local_builder.fadd(local_builder.fmul(i, j), acc)
 
     out_ptr = local_builder.add(local_idx, local_builder.mul(global_idx, ir.Constant(ir.IntType(32), out_shape[1])))
-    out = local_builder.store(acc, local_builder.gep(fxn.args[2], [out_ptr]))
+    out = local_builder.store(acc, local_builder.gep(fxn.args[2], [out_ptr], inbounds=True))
     out_builder.ret_void()
 
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
@@ -255,7 +255,7 @@ class LLVMCodegen:
     for i in range(1, len(cache)):
       out = self.op_map[op](local_builder, cache[i], out)
 
-    store_idx = local_builder.gep(fxn.args[1], [local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis])), local_idx)]) if blocked else local_builder.gep(fxn.args[1], [local_idx])
+    store_idx = local_builder.gep(fxn.args[1], [local_builder.add(local_builder.mul(global_idx if blocked else local_idx, ir.Constant(ir.IntType(32), strides[::-1][axis])), local_idx)], inbounds=True) if blocked else local_builder.gep(fxn.args[1], [local_idx], inbounds=True)
     local_builder.store(out, store_idx)
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32),1))
     local_idx.add_incoming(local_e_n, local_block)
@@ -322,10 +322,10 @@ class LLVMCodegen:
       axis_idx = [local_idx, local_idx]
     else:
       axis_idx = [local_idx, global_idx]
-    av = local_builder.load(local_builder.gep(fxn.args[0], [axis_idx[axis]]))
+    av = local_builder.load(local_builder.gep(fxn.args[0], [axis_idx[axis]], inbounds=True))
     indx = local_builder.mul(global_idx, ir.Constant(ir.IntType(32), np.prod(in_shape)))
     indx = local_builder.add(indx, local_idx)
-    bv = local_builder.gep(fxn.args[1], [indx])
+    bv = local_builder.gep(fxn.args[1], [indx], inbounds=True)
     local_builder.store(av, bv)
     local_e_n = local_builder.add(local_idx, ir.Constant(ir.IntType(32), 1))
     local_idx.add_incoming(local_e_n, local_block)
@@ -354,8 +354,8 @@ class LLVMCodegen:
     s_ptr, e_ptr = ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), np.prod(shapes.shape))
     idx = loop_builder.phi(ir.IntType(32))
     idx.add_incoming(s_ptr, inp_block)
-    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx]))
-    out_ptr = loop_builder.gep(fxn.args[1], [idx])
+    av = loop_builder.load(loop_builder.gep(fxn.args[0], [idx], inbounds=True))
+    out_ptr = loop_builder.gep(fxn.args[1], [idx], inbounds=True)
     loop_builder.store(av, out_ptr)
     idx_n = loop_builder.add(idx, ir.Constant(ir.IntType(32), 1))
     idx.add_incoming(idx_n, loop_block)
