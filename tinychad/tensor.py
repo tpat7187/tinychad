@@ -40,17 +40,22 @@ import tinychad.ops as ops
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
   def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
+    # need a backend config class
     if LLVM: backend=Compiled.LLVM
     elif CUDA: backend=Compiled.CUDA
     else: backend= Interpreted.CPU
 
     if backend in Compiled or LAZY:
-      if isinstance(data, LazyBuffer): 
-        self.data, self.data.backend = data, backend
+      if isinstance(data, LazyBuffer): self.data, self.data.backend = data, backend
       else:
         self.data = LazyBuffer(data.shape, op, None, data, backend=backend)
-    else:
-      self.data = Buffer(data, op) 
+    elif backend in Interpreted:
+      if isinstance(data, Buffer): self.data = data
+      else:
+        self.data = Buffer(data, op, backend=backend)
+    else: 
+        raise RuntimeError(f"cannot create tesnor from {data} on {backend}")
+      
 
     self.grad, self.requires_grad, self.op = None, requires_grad, op
 
@@ -87,7 +92,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
+    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}] on {self.data.backend}>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)

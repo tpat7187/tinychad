@@ -3,6 +3,7 @@ import numpy as np
 from typing import Union, Tuple, Optional, List
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
 from tinychad.llvm import LLVMCodegen
+from tinychad.cuda import CUDACodegen
 
 op_map = { 
     BinaryOPS.ADD   : lambda x, y: np.add(x,y),
@@ -27,8 +28,8 @@ op_map = {
 }
 
 class Buffer: 
-    __slots__ = "data", "shape", "strides", "op"
-    def __init__(self, data:Union[np.ndarray, list, float, np.float32], op):
+    __slots__ = "data", "shape", "strides", "op", "backend"
+    def __init__(self, data:Union[np.ndarray, list, float, np.float32], op, backend):
         if isinstance(data, np.ndarray):
             self.data = data
 
@@ -41,6 +42,7 @@ class Buffer:
         self.op = op
         self.shape = self.data.shape
         self.strides = ViewTracker.generate_strides(self.shape)
+        self.backend = backend
 
     def __repr__(self): return f"{self.shape} Buffer"
 
@@ -62,7 +64,8 @@ class Buffer:
     def sqrt(self): return self.unary_op(UnaryOPS.SQRT)
 
     # fxn example: BinaryOPS.ADD
-    def binary_op(self, fxn, x): return op_map[fxn](self.data, x.data)
+    def binary_op(self, fxn, x): 
+       return Buffer(data=op_map[fxn](self.data, x.data), op=fxn, backend=self.backend)
     def unary_op(self, fxn): return op_map[fxn](self.data)
     def shape_op(self, fxn, axis, keepdim): return op_map[fxn](self.data, axis=axis, keepdims=keepdim)
     def reshape_op(self, fxn, args): 
@@ -121,12 +124,15 @@ class LazyBuffer:
         elif self.op in ReshapeOPS:
           args = self.ctx
           s = op_map[self.op](self.data, args)
-        return Buffer(s, self.op)
+        return Buffer(s, self.op, self.backend)
       else: 
-        codegen = LLVMCodegen(self.get_buffers())
+        if self.backend == Compiled.LLVM: codegen = LLVMCodegen(self.get_buffers())
+        elif self.backend == Compiled.CUDA: codegen = CUDACodegen(self.get_buffers(), self)
+
+
         codegen.compile()
 
-        return Buffer(self.data, self.op)
+        return Buffer(self.data, self.op, self.backend)
 
     def toposort(self) -> Tuple[LazyBuffer, ...]: 
       topo, vis = [], []
