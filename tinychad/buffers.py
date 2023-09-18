@@ -66,20 +66,19 @@ class Buffer:
     # fxn example: BinaryOPS.ADD
     def binary_op(self, fxn, x): 
        return Buffer(data=op_map[fxn](self.data, x.data), op=fxn, backend=self.backend)
-    def unary_op(self, fxn): return op_map[fxn](self.data)
-    def shape_op(self, fxn, axis, keepdim): return op_map[fxn](self.data, axis=axis, keepdims=keepdim)
+    def unary_op(self, fxn): 
+       return Buffer(op_map[fxn](self.data), op=fxn, backend=self.backend) 
+    def shape_op(self, fxn, axis, keepdim): 
+       return Buffer(op_map[fxn](self.data, axis=axis, keepdims=keepdim), op=fxn, backend=self.backend)
     def reshape_op(self, fxn, args): 
-        if fxn == ReshapeOPS.PAD: assert isinstance(args, (tuple, list))
-        if fxn == ReshapeOPS.SLICE: return self.slice(args)
-        return op_map[fxn](self.data, args)
+        if fxn == ReshapeOPS.SLICE: return Buffer(self.slice(args), op=fxn, backend=self.backend)
+        return Buffer(op_map[fxn](self.data, args), op=fxn, backend=self.backend)
     
     def slice(x:Buffer, args) -> Buffer:
         args = (args) if isinstance(args, int) else args
         out = x.data[tuple(*args)]
         return out if out.shape != () else [out]
 
-
-# new lazy buffer
 class LazyBuffer: 
     __slots__ = "shape", "op", "children", "data", "ctx", "strides", "backend"
     def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None, backend=None): 
@@ -129,9 +128,7 @@ class LazyBuffer:
         if self.backend == Compiled.LLVM: codegen = LLVMCodegen(self.get_buffers())
         elif self.backend == Compiled.CUDA: codegen = CUDACodegen(self.get_buffers(), self)
 
-
         codegen.compile()
-
         return Buffer(self.data, self.op, self.backend)
 
     def toposort(self) -> Tuple[LazyBuffer, ...]: 

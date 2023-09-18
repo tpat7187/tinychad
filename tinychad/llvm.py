@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np 
 import llvmlite.ir as ir
 import llvmlite.binding as llvm
