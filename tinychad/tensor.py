@@ -65,6 +65,9 @@ class tensor:
   @staticmethod
   def randn(*shape, **kwargs): return tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
 
+  @staticmethod 
+  def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
+
   @staticmethod
   def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
 
@@ -119,6 +122,7 @@ class tensor:
   def sub(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.SUB, x, reverse)
   def mul(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
   def div(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
+  def cmp(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.CMP, x, reverse)
   def dot(self, x:Union[tensor, float, int], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
 
   # unary ops
@@ -157,6 +161,11 @@ class tensor:
     ss = (self.sub(mn).square()).sum(axis=axis, keepdim=keepdim)
     out = ss / (np.prod(self.shape)/np.prod(ss.shape))
     return out
+
+  def argmax(self, axis:Optional[int]=None) -> tensor: 
+    shape = [1 if _ != axis else -1 for _ in range(len(self.shape))] if axis != None else self.shape
+    arg = tensor.arange(self.shape[axis] if axis != None else np.prod(self.shape)).reshape(*shape).cast_to(self.shape)
+    return (self.max(axis=axis, keepdim=True).cmp(self)).mul(arg).sum(axis=axis)
 
   def detach(self) -> np.ndarray: 
     if not self.realized(): 
@@ -286,7 +295,7 @@ class tensor:
       if len(x.op.saved) == 1: 
         grads = [grads]
       for buf, gr in zip(x.op.saved, grads): 
-          buf.grad = gr if buf.grad is None else gr + buf.grad
+        buf.grad = gr if buf.grad is None else gr + buf.grad
       x.grad = None if not x.requires_grad else x.grad
 
   def cast_op(self, fxn:ops.OP, x: tensor, reverse:bool) -> tensor:

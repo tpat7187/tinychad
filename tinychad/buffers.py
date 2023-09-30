@@ -11,6 +11,7 @@ op_map = {
     BinaryOPS.MUL   : lambda x, y: np.multiply(x,y),
     BinaryOPS.DIV   : lambda x, y: np.divide(x,y),
     BinaryOPS.MATMUL: lambda x, y: np.matmul(x,y),
+    BinaryOPS.CMP   : lambda x, y: (x == y).astype(np.promote_types(x.dtype, np.float32)),
 
     UnaryOPS.RELU   : lambda x : np.maximum(x, 0),
     UnaryOPS.EXP    : lambda x : np.exp(x),
