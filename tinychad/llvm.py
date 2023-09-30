@@ -44,6 +44,7 @@ class LLVMCodegen:
       BinaryOPS.SUB : lambda builder, x, y: builder.fsub(x,y),
       BinaryOPS.MUL : lambda builder, x, y: builder.fmul(x,y),
       BinaryOPS.DIV : lambda builder, x, y: builder.fdiv(x,y),
+      BinaryOPS.CMP  : lambda builder, x, y: builder.uitofp(builder.fcmp_unordered("==", x, y), ir.FloatType()),
 
       UnaryOPS.NEG: lambda builder, x: builder.fmul(x, ir.Constant(ir.FloatType(), -1)),
       UnaryOPS.EXP: lambda builder, x: builder.call(builder._block.module.declare_intrinsic('llvm.exp', [ir.FloatType()]), [x]),
