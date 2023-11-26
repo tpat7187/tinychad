@@ -9,7 +9,7 @@ goals:
 TODO: 
   * computation graph
   * LLVM/MLIR backend
-    * MNIST IN THE WEB
+    * multithreading?
   * update training/testing
     * batchnorm2d passing tests
   * state dict for transfer learning
