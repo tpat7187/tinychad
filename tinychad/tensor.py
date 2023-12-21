@@ -3,17 +3,11 @@ import numpy as np
 import os
 import time
 from typing import List, Optional, Tuple, Union, Type
-from tinychad.buffers import Buffer, LazyBuffer
+from tinychad.buffers import Buffer, Buffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Interpreted, Compiled
 
 
 DEBUG = os.getenv("DEBUG") 
-
-
-# move to device config
-LAZY = os.getenv("LAZY")
-LLVM = os.getenv("LLVM")
-CUDA = os.getenv("CUDA")
 
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
@@ -39,24 +33,10 @@ import tinychad.ops as ops
 # **** TENSOR CLASS ****
 class tensor: 
   __slots__ = "data", "requires_grad", "op", "grad"
-  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
-    # need a backend config class
-    if LLVM: backend=Compiled.LLVM
-    elif CUDA: backend=Compiled.CUDA
-    else: backend= Interpreted.CPU
+  def __init__(self, data: Union[np.ndarray, Buffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
 
-    if backend in Compiled or LAZY:
-      if isinstance(data, LazyBuffer): self.data, self.data.backend = data, backend
-      else:
-        self.data = LazyBuffer(data.shape, op, None, data, backend=backend)
-    elif backend in Interpreted:
-      if isinstance(data, Buffer): self.data = data
-      else:
-        self.data = Buffer(data, op, backend=backend)
-    else: 
-        raise RuntimeError(f"cannot create tesnor from {data} on {backend}")
-      
-
+    # method for creating buffers
+    self.data = Buffer.create_buffer(data, op)
     self.grad, self.requires_grad, self.op = None, requires_grad, op
 
   @staticmethod
@@ -95,7 +75,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}] on {self.data.backend}>"
+    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -372,7 +352,7 @@ class tensor:
 
   def typecast(self, dtype): return self.detach().astype(dtype)
   
-  # if LazyBuffer has data it is realized
+  # if Buffer has data it is realized
   def realized(self) -> bool: 
     return self.data.realized()
 

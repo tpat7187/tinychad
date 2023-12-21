@@ -63,7 +63,7 @@ l1 = Linear(25, 10)
 out = l1(x).exec() # execute cache with LLVM codegen
 ```
 
-to export the model run PORT=1 (this will load all the buffers into the LLVM module instead of reading the pointers from the LazyBuffers)
+to export the model run PORT=1 (this will load all the buffers into the LLVM module instead of reading the pointers from the Buffers)
 
 ```LLVM
 ; ModuleID = ""
