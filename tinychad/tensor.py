@@ -151,6 +151,13 @@ class tensor:
 
   def reciprocal(self) -> tensor: return 1 / self
 
+  def alloc(self) -> None: return self.data._alloc()
+
+  # maybe this should alloc as well when we all _buf if needed
+  def _buf(self): 
+    self.alloc()
+    return self.data.data
+
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp() 

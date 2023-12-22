@@ -8,11 +8,6 @@ class LoadOP:
   def __init__(self, shape, loadop, arg=None): 
     self.shape, self.arg, self.loadop = shape, arg, loadop 
 
-  def alloc(self): 
-    if self.loadop == LoadOPS.RAND: return Buffer.alloc_rand(self.shape)
-    elif self.loadop == LoadOPS.CONST: return Buffer.alloc_const(self.shape, self.arg)
-    else: raise NotImplementedError
-
   def __repr__(self): return str(self.loadop)
 
 class Buffer: 
@@ -20,6 +15,9 @@ class Buffer:
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx = shape, op, children, ctx
       self.strides = ViewTracker.generate_strides(shape)
+
+      # this is where the data will be stored when the buffer is alloc'd
+      self.data = data
 
   @property 
   def dtype(self): return np.float32
@@ -46,21 +44,33 @@ class Buffer:
   def read_load(data) -> Buffer: 
     if isinstance(data, (int, float)): 
       _loadop = LoadOP((1,), LoadOPS.READ)
-      return Buffer((1,), _loadop)
+      return Buffer((1,), _loadop, data=data)
     elif isinstance(data, np.ndarray): 
       _loadop = LoadOP(data.shape, LoadOPS.READ)
-      return Buffer(data.shape, _loadop)
+      return Buffer(data.shape, _loadop, data=data)
     elif isinstance(data, list): 
       _loadop = LoadOP((len(data),1), LoadOPS.READ)
-      return Buffer((len(data),1), _loadop)
+      _bufcast = np.array(data).astype(np.float32)
+      return Buffer(_bufcast.shape, _loadop, data=_bufcast)
     else: 
       raise NotImplementedError
 
-  def alloc_const(shape:Tuple[int, ...], arg:int) -> np.ndarray:
-    return np.full(shape, arg).astype(np.float32)
+  def _alloc(self): 
+    if self.op.loadop == LoadOPS.RAND: 
+      return self.alloc_rand(self.op.shape)
+    elif self.op.loadop == LoadOPS.CONST: 
+      return self.alloc_const(self.op.shape, self.op.arg)
+    elif self.op.loadop == LoadOPS.READ: 
+      return 
+    else: raise NotImplementedError
 
-  def alloc_rand(shape:Tuple[int, ...]) -> np.ndarray:
-    return np.random.randn(*shape).astype(np.float32)
+  def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    self.data = np.full(shape, arg).astype(np.float32)
+
+  def alloc_rand(self, shape:Tuple[int, ...]) -> np.ndarray:
+    self.data =  np.random.randn(*shape).astype(np.float32)
+
+  # dont need an alloc_read as those are automatically loaded into the buffer
 
   def toposort(self) -> Tuple[Buffer, ...]: 
     topo, vis = [], []
@@ -137,7 +147,7 @@ class ViewTracker:
 
   def _slice(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
-    # TEMPORARY HACK 
+    # TEMPORARY HACK
     # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
     # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
     out_s = np.empty(in_s.shape)[arg].shape
