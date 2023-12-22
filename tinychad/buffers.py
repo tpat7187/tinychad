@@ -31,16 +31,13 @@ class Buffer:
     # a Buffer is realized if its data is not None
     def realized(self:Buffer) -> bool: return self.data is not None
 
-    @staticmethod 
-    def create_buffer(data:Union[np.ndarray, list, int, float, Buffer], op): 
-      if isinstance(data, list): 
-        return Buffer((len(data),), op, None, data)
-      elif isinstance(data, (int, float)): 
-        return Buffer((1,), op, None, data)
-      elif isinstance(data, Buffer): 
-        return data
+    @staticmethod
+    def create_buffer(data: Union[np.ndarray, list, int, float, Buffer], op):
+      if isinstance(data, Buffer):
+          return data
       else:
-        return Buffer(data.shape, op, None, data)
+          shape = data if isinstance(data, tuple) else (len(data),) if isinstance(data, list) else (1,)
+          return Buffer(shape, op, data=None)
 
     def toposort(self) -> Tuple[Buffer, ...]: 
       topo, vis = [], []

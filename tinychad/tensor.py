@@ -36,14 +36,14 @@ class tensor:
   def __init__(self, data: Union[np.ndarray, Buffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
 
     # method for creating buffers
-    self.data = Buffer.create_buffer(data, op)
+    self.data = Buffer.create_buffer(data, op) if not isinstance(data, Buffer) else data
     self.grad, self.requires_grad, self.op = None, requires_grad, op
-
+    
   @staticmethod
   def ones(*shape, **kwargs): return tensor(np.ones(*shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
+  def randn(*shape, **kwargs): return tensor(Buffer.create_buffer(shape, LoadOPS.RAND), op = LoadOPS.RAND, **kwargs)
 
   @staticmethod 
   def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
