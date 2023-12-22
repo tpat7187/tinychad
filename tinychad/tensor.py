@@ -49,9 +49,6 @@ class tensor:
   def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
-
-  @staticmethod
   def zeros(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=0), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod

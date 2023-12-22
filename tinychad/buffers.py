@@ -3,14 +3,15 @@ import numpy as np
 from typing import Union, Tuple, Optional, List
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
 
-
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
   def __init__(self, shape, loadop, arg=None): 
     self.shape, self.arg, self.loadop = shape, arg, loadop 
 
   def alloc(self): 
-    print("TODO: this will alloc the memory and do something on the buffer")
+    if self.loadop == LoadOPS.RAND: return Buffer.alloc_rand(self.shape)
+    elif self.loadop == LoadOPS.CONST: return Buffer.alloc_const(self.shape, self.arg)
+    else: raise NotImplementedError
 
   def __repr__(self): return str(self.loadop)
 
@@ -31,18 +32,6 @@ class Buffer:
   # a Buffer is realized if its data is not None
   def realized(self:Buffer) -> bool: return self.data is not None
 
-  '''
-  LOAD OPS:
-  READ -> read directly from buffer/list/ndarray
-    ; input: float, int, list, ndarray
-  CONST -> fill with 0's 1's or any arg
-    ; input: shape, arg
-  RAND -> randomize
-    ; input: shape
-
-  we probably need a new OP called LOADOP 
-  '''
-
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
     _loadop = LoadOP(shape, LoadOPS.CONST, arg=arg)
@@ -56,16 +45,22 @@ class Buffer:
   @staticmethod
   def read_load(data) -> Buffer: 
     if isinstance(data, (int, float)): 
-      _loadop = LoadOP((1,), LoadOPS.LOAD)
+      _loadop = LoadOP((1,), LoadOPS.READ)
       return Buffer((1,), _loadop)
     elif isinstance(data, np.ndarray): 
-      _loadop = LoadOP(data.shape, LoadOPS.LOAD)
+      _loadop = LoadOP(data.shape, LoadOPS.READ)
       return Buffer(data.shape, _loadop)
     elif isinstance(data, list): 
-      _loadop = LoadOP((len(data),1), LoadOPS.LOAD)
+      _loadop = LoadOP((len(data),1), LoadOPS.READ)
       return Buffer((len(data),1), _loadop)
     else: 
       raise NotImplementedError
+
+  def alloc_const(shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    return np.full(shape, arg).astype(np.float32)
+
+  def alloc_rand(shape:Tuple[int, ...]) -> np.ndarray:
+    return np.random.randn(*shape).astype(np.float32)
 
   def toposort(self) -> Tuple[Buffer, ...]: 
     topo, vis = [], []
