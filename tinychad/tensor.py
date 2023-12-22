@@ -36,14 +36,14 @@ class tensor:
   def __init__(self, data: Union[np.ndarray, Buffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
 
     # method for creating buffers
-    self.data = Buffer.create_buffer(data, op) if not isinstance(data, Buffer) else data
+    self.data = Buffer.read_load(data) if not isinstance(data, Buffer) else data
     self.grad, self.requires_grad, self.op = None, requires_grad, op
     
   @staticmethod
-  def ones(*shape, **kwargs): return tensor(np.ones(*shape, dtype=np.float32), **kwargs)
+  def ones(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=1), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(Buffer.create_buffer(shape, LoadOPS.RAND), op = LoadOPS.RAND, **kwargs)
+  def randn(*shape, **kwargs): return tensor(Buffer.rand_load(shape), op = LoadOPS.RAND, **kwargs)
 
   @staticmethod 
   def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
@@ -52,7 +52,7 @@ class tensor:
   def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return tensor(np.zeros(*shape, dtype=np.float32), **kwargs)
+  def zeros(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=0), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
   def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32), **kwargs)

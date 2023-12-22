@@ -3,66 +3,94 @@ import numpy as np
 from typing import Union, Tuple, Optional, List
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
 
+
+class LoadOP: 
+  __slots__ = "shape", "arg", "loadop"
+  def __init__(self, shape, loadop, arg=None): 
+    self.shape, self.arg, self.loadop = shape, arg, loadop 
+
+  def alloc(self): 
+    print("TODO: this will alloc the memory and do something on the buffer")
+
+  def __repr__(self): return str(self.loadop)
+
 class Buffer: 
-    __slots__ = "shape", "op", "children", "data", "ctx", "strides"
-    def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
-        self.shape, self.op, self.children = shape, op, children
-        self.ctx = ctx
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides"
+  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
+      self.shape, self.op, self.children, self.ctx = shape, op, children, ctx
+      self.strides = ViewTracker.generate_strides(shape)
 
-        if data is None: 
-           self.data = data
-        elif isinstance(data, np.ndarray):
-            self.data = data
-        elif isinstance(data, (int, float, np.float32)):
-            self.data = np.array([data], dtype=np.float32)
-        elif isinstance(data, list):
-            self.data = np.array(data, dtype=np.float32)
+  @property 
+  def dtype(self): return np.float32
 
-        self.strides = ViewTracker.generate_strides(shape)
+  def binary_op(self, fxn, x:Buffer)     -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+  def unary_op(self, fxn)                -> Buffer: return Buffer(self.shape, fxn, [self])
+  def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+  def reshape_op(self, fxn, args)        -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
-    @property 
-    def dtype(self): return np.float32
+  # a Buffer is realized if its data is not None
+  def realized(self:Buffer) -> bool: return self.data is not None
 
-    def binary_op(self, fxn, x:Buffer)     -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
-    def unary_op(self, fxn)                -> Buffer: return Buffer(self.shape, fxn, [self])
-    def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
-    def reshape_op(self, fxn, args)        -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
+  '''
+  LOAD OPS:
+  READ -> read directly from buffer/list/ndarray
+    ; input: float, int, list, ndarray
+  CONST -> fill with 0's 1's or any arg
+    ; input: shape, arg
+  RAND -> randomize
+    ; input: shape
 
-    # a Buffer is realized if its data is not None
-    def realized(self:Buffer) -> bool: return self.data is not None
+  we probably need a new OP called LOADOP 
+  '''
 
-    @staticmethod
-    def create_buffer(data: Union[np.ndarray, list, int, float, Buffer], op):
-      if isinstance(data, Buffer):
-          return data
-      else:
-          shape = data if isinstance(data, tuple) else (len(data),) if isinstance(data, list) else (1,)
-          return Buffer(shape, op, data=None)
+  @staticmethod
+  def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
+    _loadop = LoadOP(shape, LoadOPS.CONST, arg=arg)
+    return Buffer(shape, _loadop)
 
-    def toposort(self) -> Tuple[Buffer, ...]: 
-      topo, vis = [], []
-      def _toposort(s: Buffer):
-        if s not in vis: 
-          vis.append(s)
-          if s.op != LoadOPS.LOAD:
-            for child in s.children: 
-              _toposort(child)
-            topo.append(s)
-      _toposort(self)
-      return topo
+  @staticmethod
+  def rand_load(shape:Tuple[int, ...]) -> Buffer:
+    _loadop = LoadOP(shape, LoadOPS.RAND)
+    return Buffer(shape, _loadop)
 
-    def get_buffers(self) -> Tuple: 
-      cache, loads = [], []
-      for s in self.toposort():
-        for i in s.children:
-          if i.op == LoadOPS.LOAD:
-            loads.append((hex(id(i)), i.shape, i.op, i))
-        _saved = tuple([hex(id(f)) for f in s.children])
-        if isinstance(s, Buffer): 
-          s.data = np.zeros(s.shape, dtype=np.float32)
-        _reg = (hex(id(s)), s.shape, s.op, s) + _saved
-        cache.append(_reg)
-      return loads + cache
+  @staticmethod
+  def read_load(data) -> Buffer: 
+    if isinstance(data, (int, float)): 
+      _loadop = LoadOP((1,), LoadOPS.LOAD)
+      return Buffer((1,), _loadop)
+    elif isinstance(data, np.ndarray): 
+      _loadop = LoadOP(data.shape, LoadOPS.LOAD)
+      return Buffer(data.shape, _loadop)
+    elif isinstance(data, list): 
+      _loadop = LoadOP((len(data),1), LoadOPS.LOAD)
+      return Buffer((len(data),1), _loadop)
+    else: 
+      raise NotImplementedError
+
+  def toposort(self) -> Tuple[Buffer, ...]: 
+    topo, vis = [], []
+    def _toposort(s: Buffer):
+      if s not in vis: 
+        vis.append(s)
+        if s.op != LoadOPS.LOAD:
+          for child in s.children: 
+            _toposort(child)
+          topo.append(s)
+    _toposort(self)
+    return topo
+
+  def get_buffers(self) -> Tuple: 
+    cache, loads = [], []
+    for s in self.toposort():
+      for i in s.children:
+        if i.op == LoadOPS.LOAD:
+          loads.append((hex(id(i)), i.shape, i.op, i))
+      _saved = tuple([hex(id(f)) for f in s.children])
+      if isinstance(s, Buffer): 
+        s.data = np.zeros(s.shape, dtype=np.float32)
+      _reg = (hex(id(s)), s.shape, s.op, s) + _saved
+      cache.append(_reg)
+    return loads + cache
 
 class ViewTracker: 
   @classmethod 
