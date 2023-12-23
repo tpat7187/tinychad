@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np 
 from typing import Union, Tuple, Optional, List
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -16,7 +16,6 @@ class Buffer:
       self.shape, self.op, self.children, self.ctx = shape, op, children, ctx
       self.strides = ViewTracker.generate_strides(shape)
 
-      # this is where the data will be stored when the buffer is alloc'd
       self.data = data
 
   @property 
@@ -33,25 +32,26 @@ class Buffer:
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
     _loadop = LoadOP(shape, LoadOPS.CONST, arg=arg)
-    return Buffer(shape, _loadop)
+    return Buffer(shape, op = LoadOPS.CONST, ctx = _loadop)
 
   @staticmethod
   def rand_load(shape:Tuple[int, ...]) -> Buffer:
     _loadop = LoadOP(shape, LoadOPS.RAND)
-    return Buffer(shape, _loadop)
+    return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
 
   @staticmethod
   def read_load(data) -> Buffer: 
     if isinstance(data, (int, float)): 
       _loadop = LoadOP((1,), LoadOPS.READ)
-      return Buffer((1,), _loadop, data=data)
+      return Buffer((1,), op=LoadOPS.READ, ctx =_loadop, data=data)
     elif isinstance(data, np.ndarray): 
+      data.astype(np.float32) if data.dtype != np.float32 else data
       _loadop = LoadOP(data.shape, LoadOPS.READ)
-      return Buffer(data.shape, _loadop, data=data)
+      return Buffer(data.shape, op=LoadOPS.READ, ctx=_loadop, data=data)
     elif isinstance(data, list): 
       _loadop = LoadOP((len(data),1), LoadOPS.READ)
       _bufcast = np.array(data).astype(np.float32)
-      return Buffer(_bufcast.shape, _loadop, data=_bufcast)
+      return Buffer(_bufcast.shape, op=LoadOPS.READ, ctx=_loadop, data=_bufcast)
     else: 
       raise NotImplementedError
 
@@ -72,12 +72,14 @@ class Buffer:
 
   # dont need an alloc_read as those are automatically loaded into the buffer
 
+  # buffer toposort, doesnt really matter
   def toposort(self) -> Tuple[Buffer, ...]: 
     topo, vis = [], []
     def _toposort(s: Buffer):
       if s not in vis: 
+        print(s.op)
         vis.append(s)
-        if s.op != LoadOPS.LOAD:
+        if s.op != LoadOPS:
           for child in s.children: 
             _toposort(child)
           topo.append(s)

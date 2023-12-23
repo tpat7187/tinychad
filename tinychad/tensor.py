@@ -43,16 +43,17 @@ class tensor:
   def ones(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=1), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(Buffer.rand_load(shape), op = LoadOPS.RAND, **kwargs)
-
-  @staticmethod 
-  def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
-
-  @staticmethod
   def zeros(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=0), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32), **kwargs)
+  def randn(*shape, **kwargs): return tensor(Buffer.rand_load(shape), op = LoadOPS.RAND, **kwargs)
+
+  @staticmethod 
+  def arange(size, **kwargs): return tensor(Buffer.read_load(np.arange(size, dtype=np.float32)), op = LoadOPS.READ, **kwargs)
+
+  @staticmethod
+  def uniform(*shape,hi=1,lo=-1,**kwargs): 
+    return tensor(Buffer.read_load(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32)), op = LoadOPS.READ,  **kwargs)
 
   @staticmethod
   def kaiming_uniform(*shape, a=0.01, **kwargs): 
@@ -264,7 +265,7 @@ class tensor:
     def _toposort(s): 
       if s not in vis: 
         vis.append(s)
-        if s.op != LoadOPS.LOAD:
+        if s.data.op not in LoadOPS:
           for child in s.op.saved: 
             _toposort(child)
           topo.append(s)
