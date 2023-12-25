@@ -21,7 +21,8 @@ class OP:
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if DEBUG: st = time.monotonic()
-    out = tensor(self.forward(*[j.data for j in x], **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
+    _op = self(saved = [*x], ctx = list(kwargs.values()))
+    out = tensor(self.forward(*[j.data for j in x], **kwargs), op = _op)
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
@@ -32,7 +33,7 @@ import tinychad.ops as ops
 
 # **** TENSOR CLASS ****
 class tensor: 
-  __slots__ = "data", "requires_grad", "op", "grad"
+  __slots__ = "data", "requires_grad", "grad", "op"
   def __init__(self, data: Union[np.ndarray, Buffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
 
     # method for creating buffers

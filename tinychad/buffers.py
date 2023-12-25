@@ -13,13 +13,14 @@ class LoadOP:
 class Buffer: 
   __slots__ = "shape", "op", "children", "data", "ctx", "strides"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
-      self.shape, self.op, self.children, self.ctx = shape, op, children, ctx
+      self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
-
-      self.data = data
 
   @property 
   def dtype(self): return np.float32
+
+  def __repr__(self): 
+    return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
   def binary_op(self, fxn, x:Buffer)     -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
   def unary_op(self, fxn)                -> Buffer: return Buffer(self.shape, fxn, [self])
@@ -69,35 +70,6 @@ class Buffer:
 
   def alloc_rand(self, shape:Tuple[int, ...]) -> np.ndarray:
     self.data =  np.random.randn(*shape).astype(np.float32)
-
-  # dont need an alloc_read as those are automatically loaded into the buffer
-
-  # buffer toposort, doesnt really matter
-  def toposort(self) -> Tuple[Buffer, ...]: 
-    topo, vis = [], []
-    def _toposort(s: Buffer):
-      if s not in vis: 
-        print(s.op)
-        vis.append(s)
-        if s.op != LoadOPS:
-          for child in s.children: 
-            _toposort(child)
-          topo.append(s)
-    _toposort(self)
-    return topo
-
-  def get_buffers(self) -> Tuple: 
-    cache, loads = [], []
-    for s in self.toposort():
-      for i in s.children:
-        if i.op == LoadOPS.LOAD:
-          loads.append((hex(id(i)), i.shape, i.op, i))
-      _saved = tuple([hex(id(f)) for f in s.children])
-      if isinstance(s, Buffer): 
-        s.data = np.zeros(s.shape, dtype=np.float32)
-      _reg = (hex(id(s)), s.shape, s.op, s) + _saved
-      cache.append(_reg)
-    return loads + cache
 
 class ViewTracker: 
   @classmethod 
