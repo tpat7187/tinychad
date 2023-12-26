@@ -1,11 +1,10 @@
 from __future__ import annotations
 import numpy as np 
 import os
-import time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, Buffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Interpreted, Compiled
-
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.helpers import generate_graph
 
 DEBUG = os.getenv("DEBUG") 
 
@@ -154,6 +153,8 @@ class tensor:
   def reciprocal(self) -> tensor: return 1 / self
 
   def alloc(self) -> None: return self.data._alloc()
+
+  def realize(self) -> tensor: return self.data.realize()
 
   # maybe this should alloc as well when we all _buf if needed
   def _buf(self): 
@@ -350,17 +351,9 @@ class tensor:
   # and create all the numpy buffers -> pass them in as void pointers
   # whats important is that we preserve the ordering of the cache
 
-  def exec(self) -> tensor:
-    if not self.realized():
-      self.data = self.data.exec()
-      return self
-    else: return self
-
-  def typecast(self, dtype): return self.detach().astype(dtype)
-  
-  # if Buffer has data it is realized
-  def realized(self) -> bool: 
-    return self.data.realized()
+  def draw_graph(self): 
+    _ast = self.realize()
+    generate_graph(_ast)
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 

@@ -1,7 +1,9 @@
 from __future__ import annotations
+import os, atexit, shlex
 import numpy as np 
-from typing import Union, Tuple, Optional, List
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+import networkx as nx
+from typing import Union, Tuple, Optional, List, Dict
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Ops
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -29,6 +31,11 @@ class Buffer:
 
   # a Buffer is realized if its data is not None
   def realized(self:Buffer) -> bool: return self.data is not None
+
+  def realize(self) -> Buffer: 
+    _ast = astRunner(self)
+    _ast.generate_base_runner()
+    return _ast
 
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
@@ -70,6 +77,38 @@ class Buffer:
 
   def alloc_rand(self, shape:Tuple[int, ...]) -> np.ndarray:
     self.data =  np.random.randn(*shape).astype(np.float32)
+
+# nodes shape should be the output buffer of the node
+class astNode: 
+    def __init__(self, bufferList:Tuple[Buffer, ...], opList:Tuple[Optional[Ops]]): 
+        self.bufferList, self.opList, self.id = bufferList, opList, id(self)
+        self.children = []
+
+    def add_child(self, child_node:'astNode'):
+        self.children.append(child_node)
+
+class astRunner: 
+    def __init__(self, root:Buffer, graph_path:str = "/tmp/ast_graph"): 
+        self._root = root
+        self.root = astNode((self._root,), (self._root.op,))
+        self.node_map: Dict[int, astNode] = {self.root.id: self.root}
+        self.G = None
+        self.graph_path = graph_path
+
+    def generate_base_runner(self): 
+        self._generate_graph(self._root, self.root)
+
+    def _generate_graph(self, buffer:Buffer, node:astNode):
+        if buffer.children is not None:
+            for child in buffer.children:
+                child_node_id = id(child)
+                if child_node_id not in self.node_map:
+                    child_node = astNode((child,), (child.op,))
+                    self.node_map[child_node_id] = child_node
+                else:
+                    child_node = self.node_map[child_node_id]
+                node.add_child(child_node)
+                self._generate_graph(child, child_node)
 
 class ViewTracker: 
   @classmethod 
