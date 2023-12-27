@@ -1,7 +1,5 @@
 from __future__ import annotations
-import os, atexit, shlex
 import numpy as np 
-import networkx as nx
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Ops
 
@@ -12,7 +10,6 @@ class LoadOP:
 
   def __repr__(self): return str(self.loadop)
 
-
   @classmethod
   def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.full(*shape, arg).astype(np.float32)
@@ -20,6 +17,7 @@ class LoadOP:
   @classmethod
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
+
 
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
@@ -39,17 +37,13 @@ class Buffer:
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
-  def binary_op(self, fxn, x:Buffer)     -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
-  def unary_op(self, fxn)                -> Buffer: return Buffer(self.shape, fxn, [self])
+  def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+  def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
   def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
-  def reshape_op(self, fxn, args)        -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
+  def reshape_op(self, fxn, args) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
   # a Buffer is realized if its data is not None
   def realized(self:Buffer) -> bool: return self.data is not None
-
-  def realize(self) -> Buffer: 
-    _ast = astRunner(self)
-    return _ast
 
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
@@ -79,40 +73,6 @@ class Buffer:
       return Buffer(_bufcast.shape, op=LoadOPS.READ, ctx=_loadop, data=_bufcast)
     else: 
       raise NotImplementedError
-
-
-
-# nodes shape should be the output buffer of the node
-class kernelNode: 
-    def __init__(self, bufferList:Tuple[Buffer, ...], opList:Tuple[Optional[Ops]]): 
-        self.bufferList, self.opList, self.id = bufferList, opList, id(self)
-        self.children = []
-
-    def add_child(self, child_node:kernelNode):
-        self.children.append(child_node)
-
-    def __repr__(self): return f"KernelNode {self.opList}"
-                
-class astRunner:
-  def __init__(self, root:Buffer, graph_path = '/tmp/ast_graph'): 
-    self._root, self.root, self.graph_path = root, kernelNode([root], [root.op]), graph_path
-    self.node_map = {self.root.id: self.root}
-    self.generate_base_runner()
-
-  def generate_base_runner(self): 
-    self._generate_graph(self._root, self.root)
-
-  def _generate_graph(self, buffer:Buffer, node:kernelNode):
-    if buffer.children is not None:
-      for child in buffer.children:
-        child_node_id = id(child)
-        if child_node_id not in self.node_map:
-          child_node = kernelNode([child], [child.op])
-          self.node_map[child_node_id] = child_node
-        else:
-          child_node = self.node_map[child_node_id]
-        node.add_child(child_node)
-        self._generate_graph(child, child_node)
   
 class ViewTracker: 
   @classmethod 

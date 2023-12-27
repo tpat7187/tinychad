@@ -145,11 +145,6 @@ class tensor:
     arg = tensor.arange(self.shape[axis] if axis != None else np.prod(self.shape)).reshape(*shape).cast_to(self.shape)
     return (self.max(axis=axis, keepdim=True).cmp(self)).mul(arg).sum(axis=axis)
 
-  def detach(self) -> np.ndarray: 
-    if not self.realized(): 
-      self.exec()
-    return self.data.data
-
   def reciprocal(self) -> tensor: return 1 / self
 
   def alloc(self) -> None: return self.data._alloc()
@@ -351,9 +346,7 @@ class tensor:
   # and create all the numpy buffers -> pass them in as void pointers
   # whats important is that we preserve the ordering of the cache
 
-  def draw_graph(self): 
-    _ast = self.realize()
-    generate_graph(_ast)
+  def draw_graph(self): generate_graph(self.data)
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 

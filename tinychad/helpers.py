@@ -26,25 +26,28 @@ def get_parameters(obj:object, max_depth:int=4, depth:int=0) -> list:
     return params
 
 def generate_graph(runner):
+    graph_path = '/tmp/ast_graph'
     G = nx.DiGraph()
 
     def _populate_graph(node, G, visited):
-        if node.id in visited:
+        if id(node) in visited:
             return
-        visited.add(node.id)
+        visited.add(id(node))
         
-        label = f"\{node.bufferList[-1].shape}\n"
-        label += '\n'.join([str(i) for i in node.opList])
-        G.add_node(node.id, label=label)
+        print(node)
+        label = f"\{node.shape}\n"
+        label += '\n'.join([str(node.op)])
+        G.add_node(id(node), label=label)
 
-        for child in node.children:
-            G.add_edge(child.id, node.id)
-            _populate_graph(child, G, visited)
+        if node.op not in LoadOPS:
+            for child in node.children:
+                G.add_edge(id(child), id(node))
+                _populate_graph(child, G, visited)
     visited = set()
-    _populate_graph(runner.root, G, visited)
-    dot_path = f'{runner.graph_path}.dot'
+    _populate_graph(runner, G, visited)
+    dot_path = f'{graph_path}.dot'
     nx.drawing.nx_pydot.write_dot(G, dot_path)
-    svg_path = f"{runner.graph_path}.svg"
+    svg_path = f"{graph_path}.svg"
     cmd = f'dot -Tsvg -Grankdir=BT "{dot_path}" -o "{svg_path}"'
     return_code = os.system(cmd)
     if return_code != 0:
