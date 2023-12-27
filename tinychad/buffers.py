@@ -12,6 +12,20 @@ class LoadOP:
 
   def __repr__(self): return str(self.loadop)
 
+
+  @classmethod
+  def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    return np.full(*shape, arg).astype(np.float32)
+
+  @classmethod
+  def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    return np.random.randn(*shape).astype(np.float32)
+
+LoadOPSAllocator = {
+  LoadOPS.RAND: LoadOP.alloc_rand,
+  LoadOPS.CONST: LoadOP.alloc_const
+}
+
 # maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
   __slots__ = "shape", "op", "children", "data", "ctx", "strides"
@@ -47,6 +61,9 @@ class Buffer:
     _loadop = LoadOP(shape, LoadOPS.RAND)
     return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
 
+  def _alloc(self): 
+    self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+
   @staticmethod
   def read_load(data) -> Buffer: 
     if isinstance(data, (int, float)): 
@@ -63,20 +80,7 @@ class Buffer:
     else: 
       raise NotImplementedError
 
-  def _alloc(self): 
-    if self.op.loadop == LoadOPS.RAND: 
-      return self.alloc_rand(self.op.shape)
-    elif self.op.loadop == LoadOPS.CONST: 
-      return self.alloc_const(self.op.shape, self.op.arg)
-    elif self.op.loadop == LoadOPS.READ: 
-      return 
-    else: raise NotImplementedError
 
-  def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
-    self.data = np.full(shape, arg).astype(np.float32)
-
-  def alloc_rand(self, shape:Tuple[int, ...]) -> np.ndarray:
-    self.data =  np.random.randn(*shape).astype(np.float32)
 
 # nodes shape should be the output buffer of the node
 class kernelNode: 
@@ -88,30 +92,15 @@ class kernelNode:
         self.children.append(child_node)
 
     def __repr__(self): return f"KernelNode {self.opList}"
-
-    def fuse_op(self, op:kernelNode) -> None: 
-      self.children.remove(op) 
-      self.bufferList += op.bufferList
-      self.children += op.children
-      self.opList += op.opList
-
-    def fuse_elementwise_ops(self): 
-      for child in self.children: 
-        if child.opList[-1] in BinaryOPS or child.opList[-1] in UnaryOPS:
-          print('fused', child, self)
                 
 class astRunner:
   def __init__(self, root:Buffer, graph_path = '/tmp/ast_graph'): 
     self._root, self.root, self.graph_path = root, kernelNode([root], [root.op]), graph_path
     self.node_map = {self.root.id: self.root}
     self.generate_base_runner()
-    self.fuse_elementwise_ops()
-#
+
   def generate_base_runner(self): 
     self._generate_graph(self._root, self.root)
-
-  def fuse_elementwise_ops(self):
-    self.root.fuse_elementwise_ops()
 
   def _generate_graph(self, buffer:Buffer, node:kernelNode):
     if buffer.children is not None:
