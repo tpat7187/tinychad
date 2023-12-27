@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np 
 from typing import Union, Tuple, Optional, List, Dict
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Ops
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, ElementWiseOPS
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -57,6 +57,22 @@ class Buffer:
 
   def _alloc(self): 
     self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+
+  def merge_elementwise_ops(self, max_size: int = 5) -> Buffer:
+    for _ in range(max_size):
+      halt = False  
+      for x in self.children:  
+        if x.op in BinaryOPS or x.op in UnaryOPS:
+          self.children += x.children
+          self.op = (self.op if isinstance(self.op, list) else [self.op]) + [x.op]
+          self.children.remove(x)
+          halt = True  
+      if not halt:  
+        break
+
+  def realize(self): 
+    self.merge_elementwise_ops()
+    return
 
   @staticmethod
   def read_load(data) -> Buffer: 

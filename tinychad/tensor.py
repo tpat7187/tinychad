@@ -356,7 +356,7 @@ class Linear:
     self.b = tensor.uniform(out_shape, lo=-bound, hi=bound) if bias else None
 
   def __call__(self, x: tensor) -> tensor: 
-    return x.dot(self.w).add(self.b)
+    return x.dot(self.w).add(self.b) if self.b is not None else x.dot(self.w)
 
 class Conv2d: 
   def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=0, stride=1, bias=True):

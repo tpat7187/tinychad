@@ -36,10 +36,12 @@ def generate_graph(runner):
         
         print(node)
         label = f"\{node.shape}\n"
-        label += '\n'.join([str(node.op)])
+        label += ', '.join([str(j.name) for j in node.op]) if isinstance(node.op, list) else str(node.op.name)
         G.add_node(id(node), label=label)
 
-        if node.op not in LoadOPS:
+
+        if node.children is not None:
+            print(node, node.children)
             for child in node.children:
                 G.add_edge(id(child), id(node))
                 _populate_graph(child, G, visited)
