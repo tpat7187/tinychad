@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np 
-import os
+import os, time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, Buffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
@@ -40,10 +40,10 @@ class tensor:
     self.grad, self.requires_grad, self.op = None, requires_grad, op
     
   @staticmethod
-  def ones(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=1), op = LoadOPS.CONST, **kwargs)
+  def ones(*shape, **kwargs): return tensor(Buffer.const_load(shape, arg=1), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return tensor(Buffer.const_load(*shape, arg=0), op = LoadOPS.CONST, **kwargs)
+  def zeros(*shape, **kwargs): return tensor(Buffer.const_load(shape, arg=0), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
   def randn(*shape, **kwargs): return tensor(Buffer.rand_load(shape), op = LoadOPS.RAND, **kwargs)

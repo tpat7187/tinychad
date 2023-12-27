@@ -27,18 +27,27 @@ def get_parameters(obj:object, max_depth:int=4, depth:int=0) -> list:
 
 def generate_graph(runner):
     G = nx.DiGraph()
-    def _populate_graph(node, G):
-        label = f"\"{node.bufferList[-1].shape}\n\"" if node.opList[-1] not in LoadOPS else f"\"{node.bufferList[-1].shape}\n {node.bufferList[-1].op}\""
+
+    def _populate_graph(node, G, visited):
+        if node.id in visited:
+            return
+        visited.add(node.id)
+        
+        label = f"\{node.bufferList[-1].shape}\n"
+        label += '\n'.join([str(i) for i in node.opList])
         G.add_node(node.id, label=label)
+
         for child in node.children:
-            edge_label = " ".join(shlex.quote(str(op)) for op in child.opList if op and op not in LoadOPS)
-            G.add_edge(child.id, node.id, label=edge_label)
-            _populate_graph(child, G)
-    _populate_graph(runner.root, G)
+            G.add_edge(child.id, node.id)
+            _populate_graph(child, G, visited)
+    visited = set()
+    _populate_graph(runner.root, G, visited)
     dot_path = f'{runner.graph_path}.dot'
     nx.drawing.nx_pydot.write_dot(G, dot_path)
     svg_path = f"{runner.graph_path}.svg"
     cmd = f'dot -Tsvg -Grankdir=BT "{dot_path}" -o "{svg_path}"'
     return_code = os.system(cmd)
-    if return_code != 0: print(f"An error occurred while generating the graph. Return code: {return_code}")
-    else: print(f"Graph saved to {svg_path}")
+    if return_code != 0:
+        print(f"An error occurred while generating the graph. Return code: {return_code}")
+    else:
+        print(f"Graph saved to {svg_path}")

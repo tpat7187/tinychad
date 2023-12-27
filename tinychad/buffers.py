@@ -12,6 +12,7 @@ class LoadOP:
 
   def __repr__(self): return str(self.loadop)
 
+# maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
   __slots__ = "shape", "op", "children", "data", "ctx", "strides"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
@@ -34,7 +35,6 @@ class Buffer:
 
   def realize(self) -> Buffer: 
     _ast = astRunner(self)
-    _ast.generate_base_runner()
     return _ast
 
   @staticmethod
@@ -79,40 +79,56 @@ class Buffer:
     self.data =  np.random.randn(*shape).astype(np.float32)
 
 # nodes shape should be the output buffer of the node
-class astNode: 
+class kernelNode: 
     def __init__(self, bufferList:Tuple[Buffer, ...], opList:Tuple[Optional[Ops]]): 
         self.bufferList, self.opList, self.id = bufferList, opList, id(self)
         self.children = []
 
-    def add_child(self, child_node:'astNode'):
+    def add_child(self, child_node:kernelNode):
         self.children.append(child_node)
 
-class astRunner: 
-    def __init__(self, root:Buffer, graph_path:str = "/tmp/ast_graph"): 
-        self._root = root
-        self.root = astNode((self._root,), (self._root.op,))
-        self.node_map: Dict[int, astNode] = {self.root.id: self.root}
-        self.G = None
-        self.graph_path = graph_path
+    def __repr__(self): return f"KernelNode {self.opList}"
 
-    def generate_base_runner(self): 
-        self._generate_graph(self._root, self.root)
+    def fuse_op(self, op:kernelNode) -> None: 
+      self.children.remove(op) 
+      self.bufferList += op.bufferList
+      self.children += op.children
+      self.opList += op.opList
 
-    def _generate_graph(self, buffer:Buffer, node:astNode):
-        if buffer.children is not None:
-            for child in buffer.children:
-                child_node_id = id(child)
-                if child_node_id not in self.node_map:
-                    child_node = astNode((child,), (child.op,))
-                    self.node_map[child_node_id] = child_node
-                else:
-                    child_node = self.node_map[child_node_id]
-                node.add_child(child_node)
-                self._generate_graph(child, child_node)
+    def fuse_elementwise_ops(self): 
+      for child in self.children: 
+        if child.opList[-1] in BinaryOPS or child.opList[-1] in UnaryOPS:
+          print('fused', child, self)
+                
+class astRunner:
+  def __init__(self, root:Buffer, graph_path = '/tmp/ast_graph'): 
+    self._root, self.root, self.graph_path = root, kernelNode([root], [root.op]), graph_path
+    self.node_map = {self.root.id: self.root}
+    self.generate_base_runner()
+    self.fuse_elementwise_ops()
+#
+  def generate_base_runner(self): 
+    self._generate_graph(self._root, self.root)
 
+  def fuse_elementwise_ops(self):
+    self.root.fuse_elementwise_ops()
+
+  def _generate_graph(self, buffer:Buffer, node:kernelNode):
+    if buffer.children is not None:
+      for child in buffer.children:
+        child_node_id = id(child)
+        if child_node_id not in self.node_map:
+          child_node = kernelNode([child], [child.op])
+          self.node_map[child_node_id] = child_node
+        else:
+          child_node = self.node_map[child_node_id]
+        node.add_child(child_node)
+        self._generate_graph(child, child_node)
+  
 class ViewTracker: 
   @classmethod 
   def generate_strides(self, shape): 
+    if isinstance(shape, int): return (0,)
     strides, shape = [1], shape[::-1]
     for x in range(0, len(shape)-1): 
       strides.append(shape[x] * strides[-1])

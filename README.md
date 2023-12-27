@@ -7,14 +7,11 @@ goals:
   - recreate important deep learning architectures using tinychad (LSTM, RESNET, Transformer)
 
 TODO: 
-  * computation graph
-  * LLVM/MLIR backend
-    * multithreading?
-  * update training/testing
-    * batchnorm2d passing tests
+  * rewrite frontend and allow for simple graph opts on the computation graph
+    * elementwise kernel fusion
+    * reshapes dont make copies
+  * write tokenizier for computation graph nodes
   * state dict for transfer learning
-  * GPU backend
-    * pycuda vs CUDA from toolkit testing
 
 ## how to chad
 tinychad is like pytorch but slower but also significantly smaller
