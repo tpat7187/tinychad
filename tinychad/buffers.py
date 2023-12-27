@@ -58,12 +58,15 @@ class Buffer:
   def _alloc(self): 
     self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
 
+  # TODO: make this traverse the graph
   def merge_elementwise_ops(self, max_size: int = 5) -> Buffer:
-    for x in self.children:  
+    for x in self.children[:]:
       if x.op in BinaryOPS or x.op in UnaryOPS and all(j.op in LoadOPS for j in x.children):
         self.children += x.children
         self.op = (self.op if isinstance(self.op, list) else [self.op]) + [x.op]
         self.children.remove(x)
+        # keep running until fully merged with all children
+        self.merge_elementwise_ops() 
 
   def realize(self): 
     self.merge_elementwise_ops()
