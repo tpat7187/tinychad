@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import numpy as np 
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
@@ -18,6 +19,7 @@ class LoadOP:
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
 
+OPT = os.getenv("OPT", 0)
 
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
@@ -26,10 +28,13 @@ LoadOPSAllocator = {
 
 # maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides"
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "kernArgs"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
+
+      # for kernel fusion
+      self.kernArgs = [self.op]
 
   @property 
   def dtype(self): return np.float32
@@ -58,19 +63,20 @@ class Buffer:
   def _alloc(self): 
     self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
 
-  # TODO: make this traverse the graph
-  def merge_elementwise_ops(self, max_size: int = 5) -> Buffer:
-    for x in self.children[:]:
-      if x.op in BinaryOPS or x.op in UnaryOPS and all(j.op in LoadOPS for j in x.children):
-        self.children += x.children
-        self.op = (self.op if isinstance(self.op, list) else [self.op]) + [x.op]
-        self.children.remove(x)
-        # keep running until fully merged with all children
-        self.merge_elementwise_ops() 
+  # maybe we dont do this
+  def merge_binary_ops(self, max_size: int = 5) -> Buffer:
+    if self.children:
+      for i in self.children:
+        if not all(op in LoadOPS for op in i.kernArgs) and any(op in BinaryOPS for op in i.kernArgs): 
+          self.kernArgs.extend(i.kernArgs)
+          self.children.extend(i.children)
+          self.children.remove(i)
+        i.merge_binary_ops(max_size)
 
-  def realize(self): 
-    self.merge_elementwise_ops()
-    return
+  def realize(self) -> Buffer:
+    if OPT: 
+      self.merge_binary_ops()
+    return self
 
   @staticmethod
   def read_load(data) -> Buffer: 
