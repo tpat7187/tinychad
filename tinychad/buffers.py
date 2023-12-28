@@ -70,9 +70,8 @@ class Buffer:
   # will descend the tree
   def merge_binary_ops(self, max_size: int = 5) -> Buffer:
     for i in self.children:
-      if any(op in BinaryOPS for op in i.kernArgs): 
-        # need to check for cycles
-        print('fusing', self, i)
+      if any(op in BinaryOPS for op in i.kernArgs) and not self.has_cycle():
+        print('fusing', self, i, self.has_cycle())
         self.kernArgs.extend(i.kernArgs)
         self.children.extend(i.children)
         self.children.remove(i)
@@ -84,6 +83,24 @@ class Buffer:
         self.merge_binary_ops()
       for child in self.children[:]:
         child.ast_kernel_fuser()
+
+  def has_cycle(self, visited=None, rec_stack=None):
+    if visited is None: 
+      visited = set() 
+    if rec_stack is None: 
+      rec_stack = set()
+    visited.add(self)
+    rec_stack.add(self)
+    if self.children:
+      for child in self.children:
+        if child not in visited:
+          if child.has_cycle(visited, rec_stack):
+            return True
+        elif child in rec_stack:
+          return True
+      rec_stack.remove(self)
+      return False
+
 
   def realize(self) -> Buffer:
     self.ast_kernel_fuser()
