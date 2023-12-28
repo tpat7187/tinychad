@@ -64,18 +64,29 @@ class Buffer:
     self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
 
   # maybe we dont do this
+  # there needs to be a generic merge ops function that gets called depending on the args in kernArgs
+  # if self.kernArgs contains Unary/Binary OP -> merge_binary_ops
+  # if self.kernArgs contains reshape OP -> merge_reshape_ops
+  # will descend the tree
   def merge_binary_ops(self, max_size: int = 5) -> Buffer:
-    if self.children:
-      for i in self.children:
-        if not all(op in LoadOPS for op in i.kernArgs) and any(op in BinaryOPS for op in i.kernArgs): 
-          self.kernArgs.extend(i.kernArgs)
-          self.children.extend(i.children)
-          self.children.remove(i)
+    for i in self.children:
+      if any(op in BinaryOPS for op in i.kernArgs): 
+        # need to check for cycles
+        print('fusing', self, i)
+        self.kernArgs.extend(i.kernArgs)
+        self.children.extend(i.children)
+        self.children.remove(i)
         i.merge_binary_ops(max_size)
 
+  def ast_kernel_fuser(self): 
+    if self.children:
+      if any(op in BinaryOPS for op in self.kernArgs): 
+        self.merge_binary_ops()
+      for child in self.children[:]:
+        child.ast_kernel_fuser()
+
   def realize(self) -> Buffer:
-    if OPT: 
-      self.merge_binary_ops()
+    self.ast_kernel_fuser()
     return self
 
   @staticmethod
