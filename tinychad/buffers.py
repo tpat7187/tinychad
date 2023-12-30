@@ -4,7 +4,7 @@ import numpy as np
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 from tinychad.tokenizer import Tokenizer
-from tinychad.runtime import ExecuteCProgram
+from tinychad.codegen import ExecuteCProgram
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -128,7 +128,6 @@ class Buffer:
     tok = Tokenizer(self) 
     self.alloc() 
     runtime = ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
-    return self
 
   def _realized(self): return self.data is not None
 

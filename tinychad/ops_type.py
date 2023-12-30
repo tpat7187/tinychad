@@ -11,3 +11,15 @@ class LoadOPS(Enum): LOAD = auto(); RAND = auto(); CONST = auto(); READ = auto()
 
 Ops = Union[UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS]
 DEBUG = os.getenv("DEBUG") 
+
+class TokenType(Enum): 
+  FUNCSTART = auto(),     # args: fxn_name, num_inputs
+  FUNCEND = auto(),
+  LOOPSTART = auto(),     # args: num_iterations, num_increment
+  LOOPSTOP = auto(),      # args: condition
+  OP = auto(),            # args: type, children
+  CMP = auto(),
+  LOAD = auto(),          # args: loadidx, inputbuffer
+  GLOBAL = auto(),        # args: storeidx
+  LOCAL = auto(),         # args: storeidx
+  ACCUMULATE = auto()     

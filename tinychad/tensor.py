@@ -145,7 +145,9 @@ class tensor:
 
   def reciprocal(self) -> tensor: return 1 / self
 
-  def realize(self) -> tensor: return self.data.realize()
+  def realize(self) -> tensor: 
+    self.data.realize()
+    return self
 
   def detach(self) -> np.ndarray: return self.data.data
 

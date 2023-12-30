@@ -1,22 +1,8 @@
 import numpy as np 
 from typing import Union
 from enum import Enum, auto
-from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, DEBUG
-
-class TokenType(Enum): 
-  FUNCSTART = auto(),     # args: fxn_name, num_inputs
-  FUNCEND = auto(),
-  LOOPSTART = auto(),     # args: num_iterations, num_increment
-  LOOPSTOP = auto(),      # args: condition
-  OP = auto(),            # args: type, children
-  CMP = auto(),
-  LOAD = auto(),          # args: loadidx, inputbuffer
-  GLOBAL = auto(),        # args: storeidx
-  LOCAL = auto(),         # args: storeidx
-
-  # for sum/max and matmul
-  ACCUMULATE = auto()     
-
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, DEBUG, TokenType
+from tinychad.codegen import CPrinter
 
 ''' 
 exmaple program, adding tensor.randn(5,5) to tensor.randn(5,5)
@@ -125,61 +111,4 @@ class Tokenizer:
       _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, buf_names])
       self.token_stream.append(_tok) 
 
-
-# token_stream + buffer -> kernel
-class CPrinter:  
-
-  @classmethod 
-  def generate_kernel(self, toks: Tokenizer):
-    lines = [] 
-    for tok in  toks.token_stream:
-      if tok.type == TokenType.FUNCSTART: 
-        cg = f"void {tok.args[0]}({', '.join(['float* ' + _ for _ in tok.args[1]])}) {{"
-        tok.codegen = cg 
-        lines.append(cg)
-
-      elif tok.type == TokenType.FUNCEND: lines.append("}")
-
-      elif tok.type == TokenType.LOOPSTOP: lines.append("}")
-
-      elif tok.type == TokenType.LOOPSTART:
-        cg = f"for (int {tok.args[-1]}={tok.start}; {tok.args[-1]}<{tok.iters}; {tok.args[-1]}+={tok.inc}) {{"
-        tok.codegen = cg
-        lines.append(cg)
-
-      elif tok.type == TokenType.LOAD: 
-        cg = f"float {tok.reg} = {tok.args[0]}[{tok.args[1]}];"
-        tok.codegen = cg 
-        lines.append(cg)
-
-      elif tok.type == TokenType.OP: 
-        if tok.args[0] in BinaryOPS:
-          op_token = ops_to_toks[tok.args[0]]
-          cg = f"float {tok.reg} = {f' {op_token} '.join([_.reg for _ in tok.args[1]])};"
-          tok.codegen = cg 
-          lines.append(cg)
-        else: 
-          op_token =  ops_to_toks[tok.args[0]]
-          outreg = tok.args[1][0].reg
-          cg = f"float {tok.reg} = {op_token}({outreg});"
-          lines.append(cg)
-          tok.codegen = cg 
-
-      elif tok.type == TokenType.GLOBAL: 
-        cg = f"{tok.args[0]}[{tok.args[1]}] = {tok.reg};"
-        tok.codegen = cg 
-        lines.append(cg)
-
-    kern = '\n'.join(lines)
-    if DEBUG: print(kern)
-     
-    return kern
-
-ops_to_toks = { 
-  BinaryOPS.ADD: '+',
-  BinaryOPS.SUB: '-',
-  BinaryOPS.MUL: '*',
-  BinaryOPS.DIV: '/',
-  UnaryOPS.RELU: 'relu'
-}
 
