@@ -1,7 +1,7 @@
 import numpy as np 
 from typing import Union
 from enum import Enum, auto
-from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, DEBUG
 
 class TokenType(Enum): 
   FUNCSTART = auto(),     # args: fxn_name, num_inputs
@@ -170,7 +170,10 @@ class CPrinter:
         tok.codegen = cg 
         lines.append(cg)
 
-    return '\n'.join(lines)
+    kern = '\n'.join(lines)
+    if DEBUG: print(kern)
+     
+    return kern
 
 ops_to_toks = { 
   BinaryOPS.ADD: '+',

@@ -119,23 +119,18 @@ class Buffer:
     rec_stack.remove(self)
     return False
 
-  def compile(self, kernel: str) -> ctypes.CDLL:
-    with tempfile.NamedTemporaryFile(suffix='.so', delete=False) as fp:
-      subprocess.check_output(
-        ['clang', '-shared', '-march=native', '-O3', '-Wall', '-Werror',
-          '-x', 'c', '-fPIC', '-o', fp.name, '-'],
-        input=kernel.encode('utf-8')
-      )
-      lib = ctypes.CDLL(fp.name)
-      return lib
-
   # we should combine this with the old realize function that toposorts the non LoadOPS
-  # TODO: this must realize things in toposorted order now
+  # need way of storing already generated kernels for reuse
   def realize(self) -> Buffer:
-    tok = Tokenizer(self) # tokenizes buffer
-    self.alloc() # allocate memory
+    for f in self.children:
+      if f.op not in LoadOPS:
+        if not f._realized(): f.realize() 
+    tok = Tokenizer(self) 
+    self.alloc() 
     runtime = ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
     return self
+
+  def _realized(self): return self.data is not None
 
   @staticmethod
   def read_load(data) -> Buffer: 

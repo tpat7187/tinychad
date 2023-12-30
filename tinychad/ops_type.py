@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from typing import Union
 from enum import Enum, auto
 
@@ -9,3 +10,4 @@ class ReshapeOPS(Enum): RESHAPE = auto(); SLICE = auto(); PAD = auto(); TRANSPOS
 class LoadOPS(Enum): LOAD = auto(); RAND = auto(); CONST = auto(); READ = auto();
 
 Ops = Union[UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS]
+DEBUG = os.getenv("DEBUG") 

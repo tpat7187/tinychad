@@ -3,10 +3,8 @@ import numpy as np
 import os, time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, Buffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, DEBUG
 from tinychad.helpers import generate_graph
-
-DEBUG = os.getenv("DEBUG") 
 
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
@@ -147,14 +145,9 @@ class tensor:
 
   def reciprocal(self) -> tensor: return 1 / self
 
-  def alloc(self) -> None: return self.data._alloc()
-
   def realize(self) -> tensor: return self.data.realize()
 
-  # maybe this should alloc as well when we all _buf if needed
-  def _buf(self): 
-    self.alloc()
-    return self.data.data
+  def detach(self) -> np.ndarray: return self.data.data
 
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
