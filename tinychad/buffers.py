@@ -1,9 +1,10 @@
 from __future__ import annotations
-import os, math
+import os, math, ctypes, subprocess, tempfile
 import numpy as np 
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 from tinychad.tokenizer import Tokenizer
+from tinychad.runtime import ExecuteCProgram
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -18,7 +19,7 @@ class LoadOP:
 
   @classmethod
   def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
-    return np.full(*shape, arg).astype(np.float32)
+    return np.full(shape, arg).astype(np.float32)
 
   @classmethod
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
@@ -71,10 +72,17 @@ class Buffer:
     return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
 
   def _alloc(self): 
-    if not self.ctx:
-      self.data = LoadOP.alloc_raw(self.shape)
-    else:
-      self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+    if self.data is None: 
+      if not self.ctx:
+        self.data = LoadOP.alloc_raw(self.shape)
+      else:
+        self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+
+  def alloc(self):
+    self._alloc()
+    if self.children: 
+      for buf in self.children:
+        buf._alloc()
 
 
   # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
@@ -114,10 +122,23 @@ class Buffer:
     rec_stack.remove(self)
     return False
 
+  def compile(self, kernel: str) -> ctypes.CDLL:
+    with tempfile.NamedTemporaryFile(suffix='.so', delete=False) as fp:
+      subprocess.check_output(
+        ['clang', '-shared', '-march=native', '-O3', '-Wall', '-Werror',
+          '-x', 'c', '-fPIC', '-o', fp.name, '-'],
+        input=kernel.encode('utf-8')
+      )
+      lib = ctypes.CDLL(fp.name)
+      return lib
+
   # we should combine this with the old realize function that toposorts the non LoadOPS
+  # TODO: this must realize things in toposorted order now
   def realize(self) -> Buffer:
-    self.ast_kernel_fuser()
-    tok = Tokenizer(self) 
+    tok = Tokenizer(self) # tokenizes buffer
+    prg = tok.kernel # get kernel
+    self.alloc() # allocate memory
+    runtime = ExecuteCProgram(prg, self, tok.fxn_name).run()
     return self
 
   @staticmethod
