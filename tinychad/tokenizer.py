@@ -56,7 +56,7 @@ class Token:
     self.type = _type
     self.args = args
 
-  def __repr__(self): return f"TOKEN: {self.type}"
+  def __repr__(self): return f"TOKEN: {self.type} {self.args}"
 
 # buffer -> token_stream
 class Tokenizer:
@@ -67,8 +67,7 @@ class Tokenizer:
     self.inputs = len(self.buf.children)
 
     self.tokenize_buffer()
-
-    print(self.token_stream)
+    self.kernel = CPrinter.generate_kernel(self)
 
   def tokenize_buffer(self):
     # all kernels have a function
@@ -79,7 +78,8 @@ class Tokenizer:
       # if loop is fully unrolled we skip adding a LOOPSTART 
       # inc is the number of ops that take place per iteration pretty much
       st, iters, inc = 0, self.buf.size, 1
-      _tok = Token(TokenType.LOOPSTART, args = [st, iters, inc])
+      loop_name = f"idx{self.loop_count}"
+      _tok = Token(TokenType.LOOPSTART, args = [st, iters, inc, loop_name])
       self.token_stream.append(_tok)
       self.loop_count += 1
       self.tokenize_operation(_tok)
@@ -94,28 +94,40 @@ class Tokenizer:
   def tokenize_operation(self, _tok:Token=None): 
     local_loads = []
     for x in range(self.inputs*_tok.args[2]):
-      load_tok = Token(TokenType.LOAD, args = [x, _tok])
+      load_tok = Token(TokenType.LOAD, args = [self.token_stream[0].args[1][x], _tok.args[3]])
       self.token_stream.append(load_tok)
-      local_loads.append(load_tok.args[0])
+      local_loads.append(load_tok)
 
-    op_tok = Token(TokenType.OP, args = [self.op, *[_ for _ in local_loads]]) 
+    op_tok = Token(TokenType.OP, args = [self.op, [_ for _ in local_loads]]) 
     self.token_stream.append(op_tok)
 
     # storing the output 
-    store_tok = Token(TokenType.GLOBAL, args = [_tok])
+    # TODO: make this more readable
+    store_tok = Token(TokenType.GLOBAL, args = [self.token_stream[0].args[1][self.inputs], _tok.args[3]])
     self.token_stream.append(store_tok)
 
   # return FUNCSTART TOKEN
   def generate_function(self): 
     op_name = self.buf.op
     self.op = op_name
+    buf_names = [f"buffer{x}" for x in range(self.inputs+1)]
     # TODO: add something to stop the matmul
     if op_name in UnaryOPS or op_name in BinaryOPS: 
       self.in_s, self.out_s = self.buf.shape, self.buf.shape
       self.fxn_name  = f"{str(op_name)}{''.join(['_' + str(j) for j in self.in_s])}"
-      _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, len(self.buf.children)])
+      _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, buf_names])
       self.token_stream.append(_tok) 
 
 # token_stream + buffer -> kernel
 class CPrinter:  
-  pass
+
+  @classmethod 
+  def generate_kernel(self, toks: Tokenizer):
+    for tok in  toks.token_stream:
+      print(tok)
+
+
+
+
+
+
