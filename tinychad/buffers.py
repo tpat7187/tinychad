@@ -13,12 +13,17 @@ class LoadOP:
   def __repr__(self): return str(self.loadop)
 
   @classmethod
+  def alloc_raw(self, shape:Tuple[int, ...]) -> np.ndarray:
+    return np.zeros(shape, dtype=np.float32)
+
+  @classmethod
   def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.full(*shape, arg).astype(np.float32)
 
   @classmethod
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
+
 
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
@@ -46,6 +51,7 @@ class Buffer:
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
+
   def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
   def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
   def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
@@ -65,7 +71,11 @@ class Buffer:
     return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
 
   def _alloc(self): 
-    self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+    if not self.ctx:
+      self.data = LoadOP.alloc_raw(self.shape)
+    else:
+      self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+
 
   # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
   def merge_binary_ops(self, max_size: int = 5) -> Buffer:
@@ -104,9 +114,10 @@ class Buffer:
     rec_stack.remove(self)
     return False
 
+  # we should combine this with the old realize function that toposorts the non LoadOPS
   def realize(self) -> Buffer:
     self.ast_kernel_fuser()
-    tok = Tokenizer(self)
+    tok = Tokenizer(self) 
     return self
 
   @staticmethod
