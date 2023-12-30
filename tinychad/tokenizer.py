@@ -56,6 +56,8 @@ class Token:
     self.type = _type
     self.args = args
 
+    self.codegen = None
+
   def __repr__(self): return f"TOKEN: {self.type} {self.args}"
 
 # buffer -> token_stream
@@ -80,6 +82,7 @@ class Tokenizer:
       st, iters, inc = 0, self.buf.size, 1
       loop_name = f"idx{self.loop_count}"
       _tok = Token(TokenType.LOOPSTART, args = [st, iters, inc, loop_name])
+      _tok.start, _tok.iters, _tok.inc = st, iters, inc
       self.token_stream.append(_tok)
       self.loop_count += 1
       self.tokenize_operation(_tok)
@@ -92,18 +95,22 @@ class Tokenizer:
 
   # will perform LOAD -> OP -> STORE inside the loop
   def tokenize_operation(self, _tok:Token=None): 
-    local_loads = []
+    local_loads, ops = [], 0
     for x in range(self.inputs*_tok.args[2]):
       load_tok = Token(TokenType.LOAD, args = [self.token_stream[0].args[1][x], _tok.args[3]])
       self.token_stream.append(load_tok)
       local_loads.append(load_tok)
+      load_tok.reg = f"local{len(local_loads)}"
 
     op_tok = Token(TokenType.OP, args = [self.op, [_ for _ in local_loads]]) 
+    op_tok.reg = f"acc{ops}" 
+    ops += 1
     self.token_stream.append(op_tok)
 
     # storing the output 
     # TODO: make this more readable
     store_tok = Token(TokenType.GLOBAL, args = [self.token_stream[0].args[1][self.inputs], _tok.args[3]])
+    store_tok.reg = op_tok.reg
     self.token_stream.append(store_tok)
 
   # return FUNCSTART TOKEN
@@ -114,20 +121,62 @@ class Tokenizer:
     # TODO: add something to stop the matmul
     if op_name in UnaryOPS or op_name in BinaryOPS: 
       self.in_s, self.out_s = self.buf.shape, self.buf.shape
-      self.fxn_name  = f"{str(op_name)}{''.join(['_' + str(j) for j in self.in_s])}"
+      self.fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.in_s])}"
       _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, buf_names])
       self.token_stream.append(_tok) 
+
 
 # token_stream + buffer -> kernel
 class CPrinter:  
 
   @classmethod 
   def generate_kernel(self, toks: Tokenizer):
+    lines = [] 
     for tok in  toks.token_stream:
-      print(tok)
+      if tok.type == TokenType.FUNCSTART: 
+        cg = f"void {tok.args[0]}({', '.join(['float* ' + _ for _ in tok.args[1]])}) {{"
+        tok.codegen = cg 
+        lines.append(cg)
 
+      elif tok.type == TokenType.FUNCEND: lines.append("}")
 
+      elif tok.type == TokenType.LOOPSTOP: lines.append("}")
 
+      elif tok.type == TokenType.LOOPSTART:
+        cg = f"for (int {tok.args[-1]}={tok.start}; {tok.args[-1]}<{tok.iters}; {tok.args[-1]}+={tok.inc}) {{"
+        tok.codegen = cg
+        lines.append(cg)
 
+      elif tok.type == TokenType.LOAD: 
+        cg = f"float {tok.reg} = {tok.args[0]}[{tok.args[1]}];"
+        tok.codegen = cg 
+        lines.append(cg)
 
+      elif tok.type == TokenType.OP: 
+        if tok.args[0] in BinaryOPS:
+          op_token = ops_to_toks[tok.args[0]]
+          cg = f"float {tok.reg} = {f' {op_token} '.join([_.reg for _ in tok.args[1]])};"
+          tok.codegen = cg 
+          lines.append(cg)
+        else: 
+          op_token =  ops_to_toks[tok.args[0]]
+          outreg = tok.args[1][0].reg
+          cg = f"float {tok.reg} = {op_token}({outreg});"
+          lines.append(cg)
+          tok.codegen = cg 
+
+      elif tok.type == TokenType.GLOBAL: 
+        cg = f"{tok.args[0]}[{tok.args[1]}] = {tok.reg};"
+        tok.codegen = cg 
+        lines.append(cg)
+
+    return '\n'.join(lines)
+
+ops_to_toks = { 
+  BinaryOPS.ADD: '+',
+  BinaryOPS.SUB: '-',
+  BinaryOPS.MUL: '*',
+  BinaryOPS.DIV: '/',
+  UnaryOPS.RELU: 'relu'
+}
 
