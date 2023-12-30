@@ -1,8 +1,9 @@
 from __future__ import annotations
-import os
+import os, math
 import numpy as np 
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.tokenizer import Tokenizer
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -19,12 +20,12 @@ class LoadOP:
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
 
-OPT = os.getenv("OPT", 0)
-
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
   LoadOPS.CONST: LoadOP.alloc_const
 }
+
+OPT = os.getenv("OPT", 0)
 
 # maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
@@ -38,6 +39,9 @@ class Buffer:
 
   @property 
   def dtype(self): return np.float32
+
+  @property
+  def size(self): return math.prod(self.shape)
 
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
@@ -63,28 +67,25 @@ class Buffer:
   def _alloc(self): 
     self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
 
-  # maybe we dont do this
-  # there needs to be a generic merge ops function that gets called depending on the args in kernArgs
-  # if self.kernArgs contains Unary/Binary OP -> merge_binary_ops
-  # if self.kernArgs contains reshape OP -> merge_reshape_ops
-  # will descend the tree
+  # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
   def merge_binary_ops(self, max_size: int = 5) -> Buffer:
     for i in self.children:
-      if any(op in BinaryOPS for op in i.kernArgs) and not self.has_cycle():
-        print('fusing', self, i, self.has_cycle())
+      if any(op in BinaryOPS for op in i.kernArgs) and self.has_cycle(i):
+        print('fusing', self, i)
         self.kernArgs.extend(i.kernArgs)
         self.children.extend(i.children)
         self.children.remove(i)
         i.merge_binary_ops(max_size)
 
   def ast_kernel_fuser(self): 
-    if self.children:
+    if OPT and self.children:
       if any(op in BinaryOPS for op in self.kernArgs): 
         self.merge_binary_ops()
       for child in self.children[:]:
         child.ast_kernel_fuser()
 
-  def has_cycle(self, visited=None, rec_stack=None):
+  # this is going to be really slow because for each op its going to need to check the entire computation graph below it
+  def has_cycle(self, target, visited=None, rec_stack=None):
     if visited is None: 
       visited = set() 
     if rec_stack is None: 
@@ -93,17 +94,19 @@ class Buffer:
     rec_stack.add(self)
     if self.children:
       for child in self.children:
-        if child not in visited:
-          if child.has_cycle(visited, rec_stack):
+        if child == target and child in rec_stack:
             return True
-        elif child in rec_stack:
-          return True
-      rec_stack.remove(self)
-      return False
-
+        if child not in visited:
+          if child.has_cycle(target, visited, rec_stack):
+            return True
+        elif child in rec_stack and child != target:
+          continue
+    rec_stack.remove(self)
+    return False
 
   def realize(self) -> Buffer:
     self.ast_kernel_fuser()
+    tok = Tokenizer(self)
     return self
 
   @staticmethod
