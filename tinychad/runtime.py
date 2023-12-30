@@ -4,7 +4,7 @@ from typing import Union, Tuple, Optional, List, Dict
 import numpy as np 
 
 class ExecuteCProgram:
-  def __init__(self, prg, bufs, fxn_name): 
+  def __init__(self, prg:str, bufs, fxn_name: str): 
     self.prg = prg
     self.args = [np.ctypeslib.as_ctypes(child.data) for child in bufs.children] + [np.ctypeslib.as_ctypes(bufs.data)]
 
@@ -21,7 +21,7 @@ class ExecuteCProgram:
       lib = ctypes.CDLL(fp.name)
       return lib
 
-  def run(self): 
+  def run(self) -> None: 
     cfun = getattr(self.dll, self.fxn_name)
     cfun(*self.args)
 

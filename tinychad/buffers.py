@@ -35,13 +35,10 @@ OPT = os.getenv("OPT", 0)
 
 # maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "kernArgs"
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
-
-      # for kernel fusion
-      self.kernArgs = [self.op]
 
   @property 
   def dtype(self): return np.float32
@@ -136,9 +133,8 @@ class Buffer:
   # TODO: this must realize things in toposorted order now
   def realize(self) -> Buffer:
     tok = Tokenizer(self) # tokenizes buffer
-    prg = tok.kernel # get kernel
     self.alloc() # allocate memory
-    runtime = ExecuteCProgram(prg, self, tok.fxn_name).run()
+    runtime = ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
     return self
 
   @staticmethod
