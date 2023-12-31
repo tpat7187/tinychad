@@ -23,3 +23,4 @@ class TokenType(Enum):
   LOCAL = auto(),         # args: loadfrom, loadat
   ACC = auto(),           # args: accfrom
   DEFINE_ACC = auto()    
+  INDEX = auto()          # args: buffer, idx
