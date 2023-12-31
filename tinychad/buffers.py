@@ -70,7 +70,7 @@ class Buffer:
 
   def _alloc(self): 
     if self.data is None: 
-      if not self.ctx:
+      if not isinstance(self.ctx, LoadOP): 
         self.data = LoadOP.alloc_raw(self.shape)
       else:
         self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
@@ -127,7 +127,7 @@ class Buffer:
         if not f._realized(): f.realize() 
     tok = Tokenizer(self) 
     self.alloc() 
-    runtime = ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
+    ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
 
   def _realized(self): return self.data is not None
 

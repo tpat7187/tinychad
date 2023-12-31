@@ -1,7 +1,8 @@
 from __future__ import annotations
 import os, ctypes, subprocess, tempfile
 from typing import Union, Tuple, Optional, List, Dict
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, TokenType, DEBUG
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, TokenType
+from tinychad.helpers import DEBUG
 import numpy as np 
 
 class ExecuteCProgram:
@@ -29,7 +30,7 @@ class ExecuteCProgram:
 
 class CPrinter:  
   @classmethod 
-  def generate_kernel(self, toks: Tokenizer):
+  def generate_kernel(self, toks):
     lines = [] 
     for tok in  toks.token_stream:
       if tok.type == TokenType.FUNCSTART: 
@@ -42,7 +43,7 @@ class CPrinter:
       elif tok.type == TokenType.LOOPSTOP: lines.append("}")
 
       elif tok.type == TokenType.LOOPSTART:
-        cg = f"for (int {tok.args[-1]}={tok.start}; {tok.args[-1]}<{tok.iters}; {tok.args[-1]}+={tok.inc}) {{"
+        cg = f"for (int {tok.reg}={tok.start}; {tok.reg}<{tok.iters}; {tok.reg}+={tok.inc}) {{"
         tok.codegen = cg
         lines.append(cg)
 
@@ -67,6 +68,16 @@ class CPrinter:
       elif tok.type == TokenType.GLOBAL: 
         cg = f"{tok.args[0]}[{tok.args[1]}] = {tok.reg};"
         tok.codegen = cg 
+        lines.append(cg)
+
+      elif tok.type == TokenType.DEFINE_ACC: 
+        cg = f"float {tok.reg}=0;"
+        tok.codegen = cg
+        lines.append(cg)
+
+      elif tok.type == TokenType.ACC: 
+        print(tok.args[0])
+        cg = f"{tok.args[1].reg} += {tok.args[0].reg};"
         lines.append(cg)
 
     kern = '\n'.join(lines)

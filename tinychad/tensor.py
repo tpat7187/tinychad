@@ -3,8 +3,8 @@ import numpy as np
 import os, time
 from typing import List, Optional, Tuple, Union, Type
 from tinychad.buffers import Buffer, Buffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, DEBUG
-from tinychad.helpers import generate_graph
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.helpers import generate_graph, DEBUG
 
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):

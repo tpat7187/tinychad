@@ -7,6 +7,11 @@ import matplotlib.pyplot as plt
 
 # blocks will be object -> several Linear/Conv2d/BatchNorm -> tensor, tensor
 # increase depth of tensor search 
+
+# TODO: make this its own class
+# measure time in frontend, backend and execution
+DEBUG = os.getenv("DEBUG") 
+
 def get_parameters(obj:object, max_depth:int=4, depth:int=0) -> list: 
     from tinychad.tensor import tensor, Conv2d, Linear, BatchNorm2d
 
