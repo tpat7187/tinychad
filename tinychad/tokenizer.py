@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np 
 from typing import Union, List, Optional, Tuple
 from enum import Enum, auto
@@ -37,27 +38,26 @@ void SUM_3_3_1(float* buffer0, float* buffer1) {
 # toposort buffers, run kern_object in order
 class Token: 
   codegen: str = ""
-  def __init__(self, _type:TokenType, args=None, reg=None): 
-    self.type = _type
-    self.args = args
-    self.reg = reg
+  def __init__(self, _type:TokenType, args:Optional[List[Token]]=None, reg:str=None): 
+    self.type, self.args, self.reg = _type, args, reg
 
   def __repr__(self): return f"TOKEN: {self.type} {self.args}"
 
-# buffer -> token_stream
+# buffer_stream -> token_stream per buffer
 class Tokenizer:
   def __init__(self, buf):
     self.buf = buf
-    self.inputs = len(self.buf.children)
-    self.buf_names = [f"buffer{x}" for x in range(self.inputs+1)]
-    self.input_args = self.buf_names[:self.inputs]
-    self.output_args = self.buf_names[self.inputs:][0]
-    self.loops = [] 
+    self.inputs:int = len(self.buf.children)
+    self.buf_names:List[str] = [f"buffer{x}" for x in range(self.inputs+1)]
+    self.loops:List[Token] = [] 
     self.token_stream:List[Token] = []
     self.local_loads:List[Token] = []
     self.local_stores:List[Token] = []
-    self.in_s: Tuple[int, ...,] = []
-    self.out_s: Tuple[int, ...,] = []
+    self.in_s:Tuple[int, ...,] = []
+    self.out_s:Tuple[int, ...,] = []
+
+    self.input_args:List[str] = self.buf_names[:self.inputs]
+    self.output_args:List[str] = self.buf_names[self.inputs:][0]
 
     self.tokenize_buffer()
 
@@ -133,7 +133,8 @@ class Tokenizer:
     self.e(acc_tok)
     return acc_tok
 
-  def e(self, token): self.token_stream.append(token)
+  def e(self, token:Token): 
+    self.token_stream.append(token)
 
   # will perform LOAD -> OP -> STORE inside the loop
   # should take in operation, sources

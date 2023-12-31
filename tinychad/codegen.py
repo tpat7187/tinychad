@@ -29,12 +29,14 @@ class ExecuteCProgram:
 
 
 class C_Codegen:  
+  KERNEL_HEADER = "#import <math.h>"
   def __init__(self, tokens): 
     self.tokens = tokens
     self.kernel = self.generate_kernel(tokens)
 
   def generate_kernel(self, toks):
     lines = [] 
+    lines.append(self.KERNEL_HEADER)
     for tok in toks:
       if tok.type == TokenType.FUNCSTART: 
         cg = f"void {tok.args[0]}({', '.join(['float* ' + _ for _ in tok.args[1]])}) {{"
@@ -82,26 +84,24 @@ class C_Codegen:
 
     kern = '\n'.join(lines)
     if DEBUG: print(kern)
-
     return kern
 
   def codegen_operation(self, token):
+    op_token = ops_to_toks[token.args[0]]
     if token.args[0] in BinaryOPS:
-      op_token = ops_to_toks[token.args[0]]
-      cg = f"{f' {op_token} '.join([f'''{x.args[0]}[{x.args[1]}]''' for x in token.args[1]])}"
-      token.codegen = cg 
-      return cg
+      cg = f"{f'{op_token}'.join([f'''{x.args[0]}[{x.args[1]}]''' for x in token.args[1]])}"
+    elif token.args[0] in UnaryOPS:
+      cg = f"{op_token}({''.join(f'{x.args[0]}[{x.args[1]}]' for x in token.args[1])})"
     else: 
-      op_token =  ops_to_toks[token.args[0]]
-      outreg = token.args[1][0].reg
-      cg = f"float {token.reg} = {op_token}({outreg});"
-      token.codegen = cg 
-      return cg
+      NotImplementedError
+    return cg
 
 ops_to_toks = { 
   BinaryOPS.ADD: '+',
   BinaryOPS.SUB: '-',
   BinaryOPS.MUL: '*',
   BinaryOPS.DIV: '/',
-  UnaryOPS.RELU: 'relu'
+  UnaryOPS.LOG: 'log',
+  UnaryOPS.EXP: 'exp',
+  UnaryOPS.SQRT: 'sqrt'
 }
