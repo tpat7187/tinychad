@@ -30,6 +30,18 @@ class ExecuteCProgram:
 
 class C_Codegen:  
   KERNEL_HEADER = "#import <math.h>"
+
+  op_map = { 
+    BinaryOPS.ADD: lambda tok1, tok2: f"{tok1} + {tok2}",
+    BinaryOPS.SUB: lambda tok1, tok2: f"{tok1} - {tok2}",
+    BinaryOPS.MUL: lambda tok1, tok2: f"{tok1} * {tok2}",
+    BinaryOPS.DIV: lambda tok1, tok2: f"{tok1} / {tok2}",
+    UnaryOPS.LOG: lambda tok1: f"log({tok1})",
+    UnaryOPS.EXP: lambda tok1: f"exp({tok1})",
+    UnaryOPS.SQRT: lambda tok1: f"sqrt({tok1})",
+    UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)"
+  }
+
   def __init__(self, tokens): 
     self.tokens = tokens
     self.kernel = self.generate_kernel(tokens)
@@ -87,21 +99,17 @@ class C_Codegen:
     return kern
 
   def codegen_operation(self, token):
-    op_token = ops_to_toks[token.args[0]]
-    if token.args[0] in BinaryOPS:
-      cg = f"{f'{op_token}'.join([f'''{x.args[0]}[{x.args[1]}]''' for x in token.args[1]])}"
-    elif token.args[0] in UnaryOPS:
-      cg = f"{op_token}({''.join(f'{x.args[0]}[{x.args[1]}]' for x in token.args[1])})"
-    else: 
-      NotImplementedError
+    args = [f'''{x.args[0]}[{x.args[1]}]''' for x in token.args[1]]
+    cg = self.op_map[token.args[0]](*args)
     return cg
 
-ops_to_toks = { 
-  BinaryOPS.ADD: '+',
-  BinaryOPS.SUB: '-',
-  BinaryOPS.MUL: '*',
-  BinaryOPS.DIV: '/',
-  UnaryOPS.LOG: 'log',
-  UnaryOPS.EXP: 'exp',
-  UnaryOPS.SQRT: 'sqrt'
-}
+
+
+
+
+
+
+
+
+
+
