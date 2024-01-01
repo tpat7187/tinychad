@@ -14,28 +14,20 @@ Backend optimizations:
 
 Loop Unrolling
 
-[[1. 1. 1. 1.]
-[1. 1. 1. 1.]
-[1. 1. 1. 1.]]
+summing a 5x5 matrix with axis = None
 
-[3. 3. 3. 3.]
-
-void SUM_3_3_1(float* buffer0, float* buffer1) {
-  for (int idx0 = 0; idx0 < 3; idx0++) {
-    float acc0 = 0; 
-    acc0 += buffer0[idx0 * 3];  // First element in the row
-    acc0 += buffer0[idx0 * 3 + 1];  // Second element in the row
-    acc0 += buffer0[idx0 * 3 + 2];  // Third element in the row
-    buffer1[idx0] = acc0;  // Store the result in the corresponding position
-  }
+void SUM_5_5(float* buffer0, float* buffer1){ 
+   float acc0; 
+   for (int idx0=0 ; idx0 < 25; idx0++) { 
+    acc0 += buffer0[idx0]
+   }
+   buffer1[0] = acc0; 
 }
+
+
+
 '''
 
-# token, needs type, args
-# generate all kernels
-# each buffer will have a kern_object?
-# kern_object will be a string
-# toposort buffers, run kern_object in order
 class Token: 
   codegen: str = ""
   def __init__(self, _type:TokenType, args:Optional[List[Token]]=None, reg:str=None): 
@@ -59,13 +51,13 @@ class Tokenizer:
     self.input_args:List[str] = self.buf_names[:self.inputs]
     self.output_args:List[str] = self.buf_names[self.inputs:][0]
 
-    self.tokenize_buffer()
-
     self.out_s = self.buf.shape
     for i in self.buf.children:
       if self.in_s != i.shape and self.in_s is not None:
         self.in_s = [self.in_s] if not isinstance(self.in_s, list) else self.in_s
         self.in_s.append(i.shape)
+
+    self.tokenize_buffer()
 
     if DEBUG: 
       for _ in self.token_stream: 
@@ -78,27 +70,22 @@ class Tokenizer:
 
     # if the axis is between the two we add a second loop, otherwise we start the acc
     if self.op in ShapeOPS: 
-      in_shape, axis = self.buf.children[0].shape, self.buf.ctx[0]
-      self.tokenize_loop(0, np.prod(self.buf.shape), 1)
+      self.axis = self.buf.ctx[0]
+      iters = np.prod(self.in_s) if not self.axis else np.prod(self.buf.shape)
       acc = self.tokenize_start_acc()
-
-      for _ in range(np.prod(self.buf.shape)):
-        load_from = self.token_stream[0].args[1][0]
-        load_at = f"{self.loops[0].reg}*{self.buf.children[0].strides[axis]}+{_}"
-        self.tokenize_acc(self.tokenize_load(load_from,load_at), acc)
-
-      store_at = self.token_stream[0].args[1][self.inputs]
-      store_tok = Token(TokenType.GLOBAL, args=[store_at, self.loops[-1].reg], reg=acc.reg)
-      self.e(store_tok)
+      loop = self.tokenize_loop(0, iters, 1)
+      idx = self.index(self.input_args[0], loop)
+      self.tokenize_acc(idx, acc)
+      self.e(Token(TokenType.LOOPSTOP))
+      self.tokenize_store(acc, self.tokenize_literal(0))
 
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
       self.tokenize_loop(st, iters, inc) 
       self.tokenize_operation(self.loops[0])
-
-    # this should be done manually
-    for _ in self.loops:
-      self.e(Token(TokenType.LOOPSTOP))
+      # this sucks
+      for _ in self.loops:
+        self.e(Token(TokenType.LOOPSTOP))
 
     self.e(Token(TokenType.FUNCEND))
     return self.token_stream
@@ -121,8 +108,12 @@ class Tokenizer:
     self.e(_tok)
     self.loops.append(_tok)
     return _tok
+  
+  def tokenize_literal(self, item:int): 
+    _tok = Token(TokenType.LITERAL, args = item, reg = item)
+    return _tok
 
-  def tokenize_acc(self, acc_tok, load_tok): 
+  def tokenize_acc(self, acc_tok:Token, load_tok:Token): 
     _tok = Token(TokenType.ACC, args = [acc_tok, load_tok])
     self.e(_tok) 
     return _tok
@@ -136,9 +127,7 @@ class Tokenizer:
   def e(self, token:Token): 
     self.token_stream.append(token)
 
-  # will perform LOAD -> OP -> STORE inside the loop
-  # should take in operation, sources
-  # if you put an OP Token in a Store then it should combine the lines
+  # compute operattion and store locally
   def tokenize_operation(self, _tok:Token=None): 
     children = [] 
     for x in range(self.inputs*_tok.args[2]):
@@ -149,7 +138,11 @@ class Tokenizer:
     store_tok = Token(TokenType.LOCAL, args = op_tok, reg = store_reg)
     self.e(store_tok)
 
-    global_store = Token(TokenType.GLOBAL, args = [store_tok, self.loops], reg = self.output_args)
+    self.tokenize_store(store_tok, _tok) 
+
+  # will take reg of token and store it in another place
+  def tokenize_store(self, _tok:Token, store_idx:Token):
+    global_store = Token(TokenType.GLOBAL, args = [_tok, store_idx], reg = self.output_args)
     self.e(global_store)
 
   # return FUNCSTART TOKEN

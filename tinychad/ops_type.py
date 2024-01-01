@@ -22,5 +22,6 @@ class TokenType(Enum):
   GLOBAL = auto(),        # args: storeidx, storename
   LOCAL = auto(),         # args: loadfrom, loadat
   ACC = auto(),           # args: accfrom
-  DEFINE_ACC = auto()    
-  INDEX = auto()          # args: buffer, idx
+  DEFINE_ACC = auto(),    
+  INDEX = auto(),         # args: buffer, idx
+  LITERAL = auto(),       # args: item

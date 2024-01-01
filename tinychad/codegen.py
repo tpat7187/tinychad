@@ -72,7 +72,7 @@ class C_Codegen:
 
       # stores into buffer
       elif tok.type == TokenType.GLOBAL: 
-        cg = f"{tok.reg}[{tok.args[1][0].reg}] = {tok.args[0].reg};"
+        cg = f"{tok.reg}[{tok.args[1].reg}] = {tok.args[0].reg};"
         tok.codegen = cg
         lines.append(cg)
       
@@ -90,8 +90,8 @@ class C_Codegen:
         lines.append(cg)
 
       elif tok.type == TokenType.ACC: 
-        print(tok.args[0])
-        cg = f"{tok.args[1].reg} += {tok.args[0].reg};"
+        # I dont really like this, its too hacky
+        cg = f"{tok.args[1].reg} += {tok.args[0].args[0]}[{tok.args[0].args[1].reg}];"
         lines.append(cg)
 
     kern = '\n'.join(lines)
