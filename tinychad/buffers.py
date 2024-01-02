@@ -4,7 +4,7 @@ import numpy as np
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 from tinychad.tokenizer import Tokenizer
-from tinychad.codegen import ExecuteCProgram
+from tinychad.codegen import ExecuteCProgram, C_Codegen
 
 class LoadOP: 
   __slots__ = "shape", "arg", "loadop"
@@ -126,10 +126,11 @@ class Buffer:
     for f in self.children:
       if f.op not in LoadOPS:
         if not f._realized(): f.realize() 
-    tok = Tokenizer(self) 
+    
+    tokenizer = Tokenizer(self) 
+    kernel = C_Codegen(tokenizer.fxn).kernel
     self.alloc() 
-    exit(1)
-    ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
+    ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
 
   def _realized(self): return self.data is not None
 

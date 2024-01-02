@@ -3,6 +3,7 @@ import ctypes, subprocess, tempfile
 from typing import Union, Tuple, Optional, List, Dict
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, TokenType
 from tinychad.helpers import DEBUG
+from tinychad.tokenizer import Token
 import numpy as np 
 
 class ExecuteCProgram:
@@ -29,7 +30,7 @@ class ExecuteCProgram:
 
 
 class C_Codegen:  
-  KERNEL_HEADER = "#import <math.h>\n#define max(x,y) (((x) >= (y)) ? (x) : (y)"
+  KERNEL_HEADER = "#import <math.h>\n#define max(x,y) ((x) >= (y)) ? (x) : (y)"
 
   op_map = { 
     BinaryOPS.ADD: lambda tok1, tok2: f"{tok1} + {tok2}",
@@ -43,65 +44,65 @@ class C_Codegen:
     UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)",
   }
 
-  def __init__(self, tokens): 
-    self.tokens = tokens
-    self.kernel = self.generate_kernel(tokens)
+  def __init__(self, fxn_token): 
+    self.fxn_token = fxn_token
+    self.lines:List[str] = [self.KERNEL_HEADER]
+    self.loads = {}
 
-  def generate_kernel(self, toks):
-    lines = [] 
-    lines.append(self.KERNEL_HEADER)
-    for tok in toks:
-      if tok.type == TokenType.FUNCSTART: 
-        cg = f"void {tok.args[0]}({', '.join(['float* ' + _ for _ in tok.args[1]])}) {{"
-        tok.codegen = cg 
-        lines.append(cg)
+    self.kernel = self.generate_kernel(fxn_token)
+    print(self.kernel)
 
-      elif tok.type == TokenType.FUNCEND: lines.append("}")
+  def generate_kernel(self, token):
+    if not isinstance(token, Token): 
+      return token
 
-      elif tok.type == TokenType.LOOPSTOP: lines.append("}")
+    if token.arg == TokenType.FUNCTION:
+      cg = f"void {token.reg}({', '.join(['float* ' + _ for _ in token.ctx])}) {{"
+      self.lines.append(cg)
+      for child in token.src:
+        self.generate_kernel(child)
+      self.lines.append("}")  
 
-      elif tok.type == TokenType.LOOP:
-        cg = f"for (int {tok.reg}={tok.start}; {tok.reg}<{tok.iters}; {tok.reg}+={tok.inc}) {{"
-        tok.codegen = cg
-        lines.append(cg)
-
-      # load from buffer
-      elif tok.type == TokenType.LOAD: 
-        cg = f"float {tok.reg} = {tok.args[0]}[{tok.args[1]}];"
-        tok.codegen = cg 
-        lines.append(cg)
-
-      # stores into buffer
-      elif tok.type == TokenType.GLOBAL: 
-        cg = f"{tok.reg}[{tok.args[1].reg}] = {tok.args[0].reg};"
-        tok.codegen = cg
-        lines.append(cg)
+    if token.arg == TokenType.DEFINE_ACC: 
+      cg = f"float {token.reg} = 0;"
+      self.loads[token.reg] = token
+      self.lines.append(cg)
       
-      # stores into float
-      elif tok.type == TokenType.LOCAL: 
-        if tok.args.type == TokenType.OP: 
-          op_string = self.codegen_operation(tok.args) 
-          cg = f"float {tok.reg}={op_string};"
-          tok.codegen = cg 
-          lines.append(cg)
+    elif token.arg == TokenType.LOOP:
+      loop_var = token.reg
+      start, end, step = token.ctx
+      self.lines.append(f"for (int {loop_var} = {start}; {loop_var} < {end}; {loop_var} += {step}) {{")
+      for child in token.src:
+        self.generate_kernel(child)
+      self.lines.append("}")  
 
-      elif tok.type == TokenType.DEFINE_ACC: 
-        cg = f"float {tok.reg}=0;"
-        tok.codegen = cg
-        lines.append(cg)
+    elif token.arg == TokenType.LOCAL:
+      for child in token.src:
+        expr = self.generate_kernel(child)
+      if token.reg in self.loads:
+        cg = f"{token.reg} = {expr};"
+      else: 
+        cg = f"float {token.reg} = {expr};"
+      self.lines.append(cg)
 
-      elif tok.type == TokenType.ACC: 
-        cg = f"{tok.args[1].reg} += {tok.args[0].reg};"
-        lines.append(cg)
+    elif token.arg == TokenType.OP:
+      arguments = []
+      for child in token.src: 
+        arguments.append(self.generate_kernel(child))
+      cg = self.op_map[token.reg](*arguments)
+      return cg
 
-    kern = '\n'.join(lines)
-    if DEBUG: print(kern)
-    return kern
+    elif token.arg == TokenType.INDEX: 
+      return token.reg
 
-  def codegen_operation(self, token):
-    args = [f'''{x.args[0]}[{x.args[1]}]''' for x in token.args[1]]
-    cg = self.op_map[token.args[0]](*args)
-    return cg
+    elif token.arg == TokenType.GLOBAL: 
+      arguments = []
+      for child in token.src: 
+        arguments.append(self.generate_kernel(child))
+      cg = f"{arguments[0]} = {arguments[1]};"
+      self.lines.append(cg)
+
+    return '\n'.join(self.lines)
 
 
 

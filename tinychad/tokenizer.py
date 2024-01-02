@@ -5,7 +5,6 @@ from typing import Union, List, Optional, Tuple, Any
 from enum import Enum, auto
 from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, TokenType, Ops
 from tinychad.helpers import DEBUG
-from tinychad.codegen import C_Codegen
 
 ''' 
 Backend optimizations: 
@@ -71,10 +70,7 @@ class Tokenizer:
     self.fxn:Token = None
 
     self.tokenize_buffer()
-
     if DEBUG: print(self.fxn)
-
-    #self.kernel = C_Codegen(self.token_stream).kernel
 
   def tokenize_buffer(self):
     self.fxn = self.generate_function() 
@@ -118,7 +114,7 @@ class Tokenizer:
       self.e(lcl, st)
       self.e(lcl, self.global_store(st, self.index(self.output_args, lcl.reg)))
 
-  def tokenize_loop(self, st, iters, inc, parent:Optional[Token]=None) -> Token:
+  def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None) -> Token:
     assert st >= 0 and iters > 0 
     loop_name = f"idx{len(self.open_loops)}"
     _tok = Token(arg=TokenType.LOOP, src = [], reg=loop_name, ctx=[st, iters, inc])
@@ -162,11 +158,11 @@ class Tokenizer:
     # TODO: add something to stop the matmul
     if op_name in UnaryOPS or op_name in BinaryOPS: 
       fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.buf.shape])}"
-      _tok = Token(arg=TokenType.FUNCTION, src=[], reg=fxn_name)
+      _tok = Token(arg=TokenType.FUNCTION, src=[], reg=fxn_name, ctx=self.buf_names)
     elif op_name in ShapeOPS:
       in_s, axis = self.buf.children[0].shape, self.buf.ctx[0]
       fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in in_s])}{'_' + str(axis) if axis is not None else ''}"
-      _tok = Token(arg=TokenType.FUNCTION, src = [], reg=fxn_name)
+      _tok = Token(arg=TokenType.FUNCTION, src = [], reg=fxn_name, ctx=self.buf_names)
     return _tok
 
 
