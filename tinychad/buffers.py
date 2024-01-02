@@ -38,6 +38,7 @@ class Buffer:
   __slots__ = "shape", "op", "children", "data", "ctx", "strides"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
+
       self.strides = ViewTracker.generate_strides(shape)
 
   @property 

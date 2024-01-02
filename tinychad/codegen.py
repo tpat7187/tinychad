@@ -29,7 +29,7 @@ class ExecuteCProgram:
 
 
 class C_Codegen:  
-  KERNEL_HEADER = "#import <math.h>"
+  KERNEL_HEADER = "#import <math.h>\n#define max(x,y) (((x) >= (y)) ? (x) : (y)"
 
   op_map = { 
     BinaryOPS.ADD: lambda tok1, tok2: f"{tok1} + {tok2}",
@@ -39,7 +39,9 @@ class C_Codegen:
     UnaryOPS.LOG: lambda tok1: f"log({tok1})",
     UnaryOPS.EXP: lambda tok1: f"exp({tok1})",
     UnaryOPS.SQRT: lambda tok1: f"sqrt({tok1})",
-    UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)"
+    UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)",
+    ShapeOPS.SUM: lambda tok1, tok2: f"{tok1} + {tok2}",
+    ShapeOPS.MAX: lambda tok1, tok2: f"(({tok1} >= {tok2})) ? ({tok1}) : ({tok2})"
   }
 
   def __init__(self, tokens): 

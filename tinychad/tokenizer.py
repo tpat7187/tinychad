@@ -2,39 +2,16 @@ from __future__ import annotations
 import numpy as np 
 from typing import Union, List, Optional, Tuple
 from enum import Enum, auto
-from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS,TokenType
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, TokenType, Ops
 from tinychad.helpers import DEBUG
 from tinychad.codegen import C_Codegen
 
 ''' 
-exmaple program, adding tensor.randn(5,5) to tensor.randn(5,5)
-no optimizations
-
 Backend optimizations: 
 
 Loop Unrolling
+Constant Folding
 
-summing a 5x5 matrix with axis = None
-
-2 FOR LOOPS
-void SUM_5_7_0(float* buffer0, float* buffer1){ 
-  for (int idx0 = 0; idx0 < 7; idx0++ ) { 
-    float acc0 = 0; 
-    // Sum over each row in the current column (5 rows)
-    for (int idx1 = 0; idx1 < 5; idx1++) {
-      acc0 += buffer0[idx1 * 7 + idx0]; 
-    }
-    buffer1[idx0] = acc0; 
-  }
-}
-
-[1., 1., 1., 1., 1., 1., 1.],
-[1., 1., 1., 1., 1., 1., 1.],
-[1., 1., 1., 1., 1., 1., 1.],
-[1., 1., 1., 1., 1., 1., 1.],
-[1., 1., 1., 1., 1., 1., 1.]])
-
-array([5., 5., 5., 5., 5.])
 '''
 
 class Token: 
@@ -106,24 +83,26 @@ class Tokenizer:
           stride = reversed_strides[i]
           tt.append(f"{self.loops[i].reg}*{stride}")
         tt = ' + '.join(tt)
-      else: 
-        tt = self.loops[0].reg
 
-      idx = self.index(self.input_args[0], tt)
+      idx = self.index(self.input_args[0], self.loops[0].reg if self.axis is None else tt)
+
       self.tokenize_acc(idx, acc)
+      self.e(Token(TokenType.LOOPSTOP))
 
       if gbl > 0: 
         self.e(Token(TokenType.LOOPSTOP))
 
       self.tokenize_store(acc, self.tokenize_literal(0) if self.axis is None else self.loops[0])
 
-      self.e(Token(TokenType.LOOPSTOP))
-
-
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
-      self.tokenize_loop(st, iters, inc) 
-      self.tokenize_operation(self.loops[0])
+      lcl = self.tokenize_loop(st, iters, inc) 
+
+      children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.args[2])]
+      op_tok = self.tokenize_operation(children)
+      local = self.tokenize_local(op_tok)
+      self.tokenize_store(local, lcl) 
+
       for _ in self.loops:
         self.e(Token(TokenType.LOOPSTOP))
 
@@ -157,6 +136,11 @@ class Tokenizer:
     _tok = Token(TokenType.ACC, args = [acc_tok, load_tok])
     self.e(_tok) 
     return _tok
+
+  def tokenize_local(self, _tok:Token): 
+    _tok = Token(TokenType.LOCAL, args = _tok, reg = f"b{len(self.local_stores)}")
+    self.e(_tok)
+    return _tok
   
   def tokenize_start_acc(self): 
     acc_tok = Token(TokenType.DEFINE_ACC)
@@ -167,18 +151,9 @@ class Tokenizer:
   def e(self, token:Token): 
     self.token_stream.append(token)
 
-  # compute operattion and store locally
-  def tokenize_operation(self, _tok:Token=None): 
-    children = [] 
-    for x in range(self.inputs*_tok.args[2]):
-      children.append(self.index(self.input_args[x], _tok.reg))
-
-    op_tok = Token(TokenType.OP, args = [self.op, children]) 
-    store_reg = f"b{len(self.local_stores)}"
-    store_tok = Token(TokenType.LOCAL, args = op_tok, reg = store_reg)
-    self.e(store_tok)
-
-    self.tokenize_store(store_tok, _tok) 
+  def tokenize_operation(self, reg:List[Token], store_reg:Optional[Token]=None):
+    op_tok = Token(TokenType.OP, args = [self.op, reg]) 
+    return op_tok
 
   # will take reg of token and store it in another place
   def tokenize_store(self, _tok:Token, store_idx:Token):

@@ -5,11 +5,6 @@ from typing import Union
 from tinychad.buffers import Buffer, Buffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
-class LOAD(OP): 
-  def __init__(self, saved = None):
-    self.arg = type(self).__name__
-    self.saved = saved
-
 # binary ops
 class ADD(OP): 
   __slots__ = "x", "y"
