@@ -99,6 +99,7 @@ class tensor:
   def mul(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
   def div(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
   def cmp(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.CMP, x, reverse)
+  def gtt(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.GT, x, reverse)
   def dot(self, x:Union[tensor, float, int], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
 
   # unary ops

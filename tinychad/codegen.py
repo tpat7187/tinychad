@@ -36,12 +36,11 @@ class C_Codegen:
     BinaryOPS.SUB: lambda tok1, tok2: f"{tok1} - {tok2}",
     BinaryOPS.MUL: lambda tok1, tok2: f"{tok1} * {tok2}",
     BinaryOPS.DIV: lambda tok1, tok2: f"{tok1} / {tok2}",
+    BinaryOPS.GTT: lambda tok1, tok2: f"max({tok1}, {tok2})",
     UnaryOPS.LOG: lambda tok1: f"log({tok1})",
     UnaryOPS.EXP: lambda tok1: f"exp({tok1})",
     UnaryOPS.SQRT: lambda tok1: f"sqrt({tok1})",
     UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)",
-    ShapeOPS.SUM: lambda tok1, tok2: f"{tok1} + {tok2}",
-    ShapeOPS.MAX: lambda tok1, tok2: f"(({tok1} >= {tok2})) ? ({tok1}) : ({tok2})"
   }
 
   def __init__(self, tokens): 
@@ -61,7 +60,7 @@ class C_Codegen:
 
       elif tok.type == TokenType.LOOPSTOP: lines.append("}")
 
-      elif tok.type == TokenType.LOOPSTART:
+      elif tok.type == TokenType.LOOP:
         cg = f"for (int {tok.reg}={tok.start}; {tok.reg}<{tok.iters}; {tok.reg}+={tok.inc}) {{"
         tok.codegen = cg
         lines.append(cg)

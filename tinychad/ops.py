@@ -51,11 +51,11 @@ class MATMUL(OP):
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     return np.matmul(out_grad, self.saved[1].detach().T), np.matmul(self.saved[0].detach().T, out_grad)
 
-class CMP(OP): 
+class GTT(OP): 
   __slots__ = "x", "y" 
   @staticmethod 
   def forward(x: Buffer, y:Buffer) -> Buffer:
-    return x.binary_op(BinaryOPS.CMP, y)
+    return x.binary_op(BinaryOPS.MAX, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     return out, out
