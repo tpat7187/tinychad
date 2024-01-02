@@ -2,13 +2,8 @@ from __future__ import annotations
 import numpy as np
 from tinychad.tensor import OP
 from typing import Union
-from tinychad.buffers import Buffer, LazyBuffer
+from tinychad.buffers import Buffer, Buffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
-
-class LOAD(OP): 
-  def __init__(self, saved = None):
-    self.arg = type(self).__name__
-    self.saved = saved
 
 # binary ops
 class ADD(OP): 
@@ -56,11 +51,11 @@ class MATMUL(OP):
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     return np.matmul(out_grad, self.saved[1].detach().T), np.matmul(self.saved[0].detach().T, out_grad)
 
-class CMP(OP): 
+class GTT(OP): 
   __slots__ = "x", "y" 
   @staticmethod 
   def forward(x: Buffer, y:Buffer) -> Buffer:
-    return x.binary_op(BinaryOPS.CMP, y)
+    return x.binary_op(BinaryOPS.MAX, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     return out, out

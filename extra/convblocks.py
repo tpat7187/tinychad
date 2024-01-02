@@ -8,13 +8,7 @@ class ConvBlock:
     self.b1 = BatchNorm2d(out_channels)
 
   def __call__(self, x):
-    x = self.c1(x)
-    x = self.b1(x).relu()
-    return x
-
-  def forward(self, x): 
-    x = self.c1(x)
-    x = self.b1(x).relu()
+    x = self.b1(self.c1(x)).relu()
     return x
 
 class ResidualConvBlock: 
@@ -67,18 +61,16 @@ if __name__ == "__main__":
   inp = tensor.randn(1,32,58,58)
 
   Conv1x1 = ConvBlock(32, 64, kernel_size=1)
-  Conv3x3 = ConvBlock(32, 64, kernel_size=3)
-  Conv1x1(inp)
-  Conv3x3(inp)
-
+  out = Conv1x1(inp).draw_graph()
+  Conv3x3(inp).draw_graph()
   ResConvBlock1x1 = ResidualConvBlock(32,64,3, shortcut = ConvBlock(32,64,3))
   ResConvBlock1x1(inp)
-
-  Bnec = BottleNeck(32,64)
-  Bnec(inp)
-
+  Conv3x3 = ConvBlock(32, 64, kernel_size=3)
   InvRes = InvertedResidualBlock(32,64)
-  InvRes(inp)
+  InvRes(inp).draw_graph()
+  Bnec = BottleNeck(32,64)
+  Bnec(inp).draw_graph()
+
 
 
 

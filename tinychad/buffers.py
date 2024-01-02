@@ -1,171 +1,159 @@
 from __future__ import annotations
+import os, math, ctypes, subprocess, tempfile
 import numpy as np 
-from typing import Union, Tuple, Optional, List
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Compiled, Interpreted
-from tinychad.llvm import LLVMCodegen
-from tinychad.cuda import CUDACodegen
+from typing import Union, Tuple, Optional, List, Dict
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.tokenizer import Tokenizer
+from tinychad.codegen import ExecuteCProgram, C_Codegen
 
-op_map = { 
-    BinaryOPS.ADD   : lambda x, y: np.add(x,y),
-    BinaryOPS.SUB   : lambda x, y: np.subtract(x,y),
-    BinaryOPS.MUL   : lambda x, y: np.multiply(x,y),
-    BinaryOPS.DIV   : lambda x, y: np.divide(x,y),
-    BinaryOPS.MATMUL: lambda x, y: np.matmul(x,y),
-    BinaryOPS.CMP   : lambda x, y: (x == y).astype(np.promote_types(x.dtype, np.float32)),
+class LoadOP: 
+  __slots__ = "shape", "arg", "loadop"
+  def __init__(self, shape, loadop, arg=None): 
+    self.shape, self.arg, self.loadop = shape, arg, loadop 
 
-    UnaryOPS.RELU   : lambda x : np.maximum(x, 0),
-    UnaryOPS.EXP    : lambda x : np.exp(x),
-    UnaryOPS.LOG    : lambda x : np.log(x),
-    UnaryOPS.NEG    : lambda x : np.negative(x),
-    UnaryOPS.SQRT   : lambda x : np.sqrt(x),
+  def __repr__(self): return str(self.loadop)
 
-    ShapeOPS.MAX    : lambda x, axis, keepdims : np.max(x, axis, keepdims=keepdims),
-    ShapeOPS.SUM    : lambda x, axis, keepdims : np.sum(x, axis, keepdims=keepdims), 
+  @classmethod
+  def alloc_raw(self, shape:Tuple[int, ...]) -> np.ndarray:
+    return np.zeros(shape, dtype=np.float32)
 
-    ReshapeOPS.CAST : lambda x, args : np.broadcast_to(x, args),
-    ReshapeOPS.PAD  : lambda x, args : np.pad(x, pad_width = args, mode = 'constant'), 
-    ReshapeOPS.TRANSPOSE : lambda x, args : np.transpose(x, args),
-    ReshapeOPS.RESHAPE : lambda x, args : np.reshape(x, args)
+  @classmethod
+  def alloc_const(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    return np.full(shape, arg).astype(np.float32)
+
+  @classmethod
+  def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
+    return np.random.randn(*shape).astype(np.float32)
+
+
+LoadOPSAllocator = {
+  LoadOPS.RAND: LoadOP.alloc_rand,
+  LoadOPS.CONST: LoadOP.alloc_const
 }
 
+OPT = os.getenv("OPT", 0)
+
+# maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
-    __slots__ = "data", "shape", "strides", "op", "backend"
-    def __init__(self, data:Union[np.ndarray, list, float, np.float32], op, backend):
-        if isinstance(data, np.ndarray):
-            self.data = data
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides"
+  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
+      self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
 
-        if isinstance(data, (int, float, np.float32)):
-            self.data = np.array([data], dtype=np.float32)
+      self.strides = ViewTracker.generate_strides(shape)
 
-        if isinstance(data, list):
-            self.data = np.array(data, dtype=np.float32)
-        
-        self.op = op
-        self.shape = self.data.shape
-        self.strides = ViewTracker.generate_strides(self.shape)
-        self.backend = backend
+  @property 
+  def dtype(self): return np.float32
 
-    def __repr__(self): return f"{self.shape} Buffer"
+  @property
+  def size(self): return math.prod(self.shape)
 
-    def realized(self): return True
+  def __repr__(self): 
+    return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
-    @property 
-    def dtype(self): return self.data.dtype
 
-    def __add__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.ADD, x)
-    def __sub__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.SUB, x)
-    def __mul__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.MUL, x)
-    def __div__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.DIV, x)
-    def __matmul__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.MATMUL, x)
+  def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+  def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
+  def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+  def reshape_op(self, fxn, args) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
-    def exp(self): return self.unary_op(UnaryOPS.EXP)
-    def log(self): return self.unary_op(UnaryOPS.LOG)
-    def neg(self): return self.unary_op(UnaryOPS.NEG)
-    def relu(self): return self.unary_op(UnaryOPS.RELU)
-    def sqrt(self): return self.unary_op(UnaryOPS.SQRT)
+  # a Buffer is realized if its data is not None
+  def realized(self:Buffer) -> bool: return self.data is not None
 
-    # fxn example: BinaryOPS.ADD
-    def binary_op(self, fxn, x): 
-       return Buffer(data=op_map[fxn](self.data, x.data), op=fxn, backend=self.backend)
-    def unary_op(self, fxn): 
-       return Buffer(op_map[fxn](self.data), op=fxn, backend=self.backend) 
-    def shape_op(self, fxn, axis, keepdim): 
-       return Buffer(op_map[fxn](self.data, axis=axis, keepdims=keepdim), op=fxn, backend=self.backend)
-    def reshape_op(self, fxn, args): 
-        if fxn == ReshapeOPS.SLICE: return Buffer(self.slice(args), op=fxn, backend=self.backend)
-        return Buffer(op_map[fxn](self.data, args), op=fxn, backend=self.backend)
+  @staticmethod
+  def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
+    _loadop = LoadOP(shape, LoadOPS.CONST, arg=arg)
+    return Buffer(shape, op = LoadOPS.CONST, ctx = _loadop)
+
+  @staticmethod
+  def rand_load(shape:Tuple[int, ...]) -> Buffer:
+    _loadop = LoadOP(shape, LoadOPS.RAND)
+    return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
+
+  def _alloc(self): 
+    if self.data is None: 
+      if not isinstance(self.ctx, LoadOP): 
+        self.data = LoadOP.alloc_raw(self.shape)
+      else:
+        self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+
+  def alloc(self):
+    self._alloc()
+    if self.children: 
+      for buf in self.children:
+        buf._alloc()
+
+
+  # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
+  def merge_binary_ops(self, max_size: int = 5) -> Buffer:
+    for i in self.children:
+      if any(op in BinaryOPS for op in i.kernArgs) and self.has_cycle(i):
+        print('fusing', self, i)
+        self.kernArgs.extend(i.kernArgs)
+        self.children.extend(i.children)
+        self.children.remove(i)
+        i.merge_binary_ops(max_size)
+
+  def ast_kernel_fuser(self): 
+    if OPT and self.children:
+      if any(op in BinaryOPS for op in self.kernArgs): 
+        self.merge_binary_ops()
+      for child in self.children[:]:
+        child.ast_kernel_fuser()
+
+  # this is going to be really slow because for each op its going to need to check the entire computation graph below it
+  def has_cycle(self, target, visited=None, rec_stack=None):
+    if visited is None: 
+      visited = set() 
+    if rec_stack is None: 
+      rec_stack = set()
+    visited.add(self)
+    rec_stack.add(self)
+    if self.children:
+      for child in self.children:
+        if child == target and child in rec_stack:
+            return True
+        if child not in visited:
+          if child.has_cycle(target, visited, rec_stack):
+            return True
+        elif child in rec_stack and child != target:
+          continue
+    rec_stack.remove(self)
+    return False
+
+  # we should combine this with the old realize function that toposorts the non LoadOPS
+  # need way of storing already generated kernels for reuse
+  def realize(self) -> Buffer:
+    for f in self.children:
+      if f.op not in LoadOPS:
+        if not f._realized(): f.realize() 
     
-    def slice(x:Buffer, args) -> Buffer:
-        args = (args) if isinstance(args, int) else args
-        out = x.data[tuple(*args)]
-        return out if out.shape != () else [out]
+    tokenizer = Tokenizer(self) 
+    kernel = C_Codegen(tokenizer.fxn).kernel
+    self.alloc() 
+    ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
 
-class LazyBuffer: 
-    __slots__ = "shape", "op", "children", "data", "ctx", "strides", "backend"
-    def __init__(self, shape, op, children:Optional[List[LazyBuffer]]=None, data:Optional[np.ndarray]=None, ctx=None, backend=None): 
-        self.shape, self.op, self.children = shape, op, children
-        self.ctx = ctx
-        if data is None: 
-           self.data = data
-        elif isinstance(data, np.ndarray):
-            self.data = data
-        elif isinstance(data, (int, float, np.float32)):
-            self.data = np.array([data], dtype=np.float32)
-        elif isinstance(data, list):
-            self.data = np.array(data, dtype=np.float32)
+  def _realized(self): return self.data is not None
 
-        self.strides = ViewTracker.generate_strides(shape)
-        self.backend = backend
-
-    @property 
-    def dtype(self): return np.float32
-
-    def binary_op(self, fxn, x:LazyBuffer) -> LazyBuffer: 
-       return LazyBuffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
-    def unary_op(self, fxn) -> LazyBuffer: 
-       return LazyBuffer(self.shape, fxn, [self])
-    def shape_op(self, fxn, axis, keepdim) -> LazyBuffer: 
-       return LazyBuffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
-    def reshape_op(self, fxn, args) -> LazyBuffer: 
-       return LazyBuffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
-
-    # a LazyBuffer is realized if its data is not None
-    def realized(self:LazyBuffer) -> bool: return self.data is not None
-
-    def exec(self:LazyBuffer) -> Buffer:
-      if self.backend in Interpreted:
-        for f in self.children:
-           if not f.realized(): f.exec()
-        if self.op in (BinaryOPS or UnaryOPS):
-          s = op_map[self.op](*[j.data for j in self.children])
-        elif self.op in ShapeOPS:
-          axis, keepdim = self.ctx
-          s = op_map[self.op](*[j.data for j in self.children], axis=axis, keepdims=keepdim)
-        elif self.op in ReshapeOPS:
-          args = self.ctx
-          s = op_map[self.op](self.data, args)
-        return Buffer(s, self.op, self.backend)
-      else: 
-        if self.backend == Compiled.LLVM: codegen = LLVMCodegen(self.get_buffers())
-        elif self.backend == Compiled.CUDA: codegen = CUDACodegen(self.get_buffers(), self)
-
-        codegen.compile()
-        return Buffer(self.data, self.op, self.backend)
-
-    def toposort(self) -> Tuple[LazyBuffer, ...]: 
-      topo, vis = [], []
-      def _toposort(s: Buffer):
-        if s not in vis: 
-          vis.append(s)
-          if s.op != LoadOPS.LOAD:
-            for child in s.children: 
-              _toposort(child)
-            topo.append(s)
-      _toposort(self)
-      return topo
-
-    def get_buffers(self) -> Tuple: 
-      cache, loads = [], []
-      for s in self.toposort():
-        for i in s.children:
-          if i.op == LoadOPS.LOAD:
-            loads.append((hex(id(i)), i.shape, i.op, i))
-        _saved = tuple([hex(id(f)) for f in s.children])
-        if isinstance(s, LazyBuffer): 
-          s.data = np.zeros(s.shape, dtype=np.float32)
-        _reg = (hex(id(s)), s.shape, s.op, s) + _saved
-        cache.append(_reg)
-      return loads + cache
-
-
-# this may just be a LazyBuffer with a different codegen module
-class GPUBuffer: 
-    def __init__(self, shape, op):
-        pass
-
+  @staticmethod
+  def read_load(data) -> Buffer: 
+    if isinstance(data, (int, float)): 
+      _loadop = LoadOP((1,), LoadOPS.READ)
+      return Buffer((1,), op=LoadOPS.READ, ctx =_loadop, data=data)
+    elif isinstance(data, np.ndarray): 
+      data.astype(np.float32) if data.dtype != np.float32 else data
+      _loadop = LoadOP(data.shape, LoadOPS.READ)
+      return Buffer(data.shape, op=LoadOPS.READ, ctx=_loadop, data=data)
+    elif isinstance(data, list): 
+      _loadop = LoadOP((len(data),1), LoadOPS.READ)
+      _bufcast = np.array(data).astype(np.float32)
+      return Buffer(_bufcast.shape, op=LoadOPS.READ, ctx=_loadop, data=_bufcast)
+    else: 
+      raise NotImplementedError
+  
 class ViewTracker: 
   @classmethod 
   def generate_strides(self, shape): 
+    if isinstance(shape, int): return (0,)
     strides, shape = [1], shape[::-1]
     for x in range(0, len(shape)-1): 
       strides.append(shape[x] * strides[-1])
@@ -173,7 +161,7 @@ class ViewTracker:
     return strides
 
   @classmethod
-  def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:LazyBuffer, **kwargs) -> Tuple[int, ...]:
+  def generate_view(self, op:Union[BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS], in_buffers:Buffer, **kwargs) -> Tuple[int, ...]:
     ReshapeOPHelpers = {
       ReshapeOPS.RESHAPE: self._reshape,
       ReshapeOPS.SLICE: self._slice,
@@ -201,7 +189,7 @@ class ViewTracker:
     elif op in ReshapeOPS: 
       return ReshapeOPHelpers[op](in_buffers, kwargs)
     
-  def _reshape(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+  def _reshape(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     arg, in_s = list(kwargs['args']), list(in_s.shape)
     out_s = tuple(arg)
     if -1 in arg:
@@ -211,21 +199,21 @@ class ViewTracker:
       out_s = tuple(arg)
     return out_s
 
-  def _slice(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+  def _slice(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     arg = kwargs['args'][0] if not isinstance(kwargs['args'][0], int) else kwargs['args'][0]
-    # TEMPORARY HACK 
+    # TEMPORARY HACK
     # we shouldnt be executing the slice to have it done, we need to interate through each of the slices and then calculate the output shape
     # numpy has broadcasting rules for how slices can be reduced EG: (1,1,5,5) -> (1,9,9) im2col the (9,1) 2nd index and the (9,9)(9,9) 3rd and 4th get broadcasted
     out_s = np.empty(in_s.shape)[arg].shape
     out_s = (1,) if out_s == () else out_s
     return out_s 
 
-  def _transpose(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+  def _transpose(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     arg, in_s = list(kwargs['args']), list(in_s.shape)
     return tuple([in_s[i] for i in arg])
 
-  def _pad(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+  def _pad(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     return tuple([i+j for i, j in zip([sum(list(j)) for j in list(kwargs['args'])], (list(in_s.shape)))])
     
-  def _cast(in_s: LazyBuffer, kwargs: dict) -> Tuple[int, ...]:
+  def _cast(in_s: Buffer, kwargs: dict) -> Tuple[int, ...]:
     return tuple(kwargs['args'])

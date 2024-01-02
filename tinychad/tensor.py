@@ -1,19 +1,10 @@
 from __future__ import annotations
 import numpy as np 
-import os
-import time
+import os, time
 from typing import List, Optional, Tuple, Union, Type
-from tinychad.buffers import Buffer, LazyBuffer
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Interpreted, Compiled
-
-
-DEBUG = os.getenv("DEBUG") 
-
-
-# move to device config
-LAZY = os.getenv("LAZY")
-LLVM = os.getenv("LLVM")
-CUDA = os.getenv("CUDA")
+from tinychad.buffers import Buffer, Buffer
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.helpers import generate_graph, DEBUG
 
 class OP: 
   def __init__(self, saved:Optional[Tuple[tensor, ...]]=None, ctx:Optional[int]=None):
@@ -27,7 +18,8 @@ class OP:
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
     if DEBUG: st = time.monotonic()
-    out = tensor(self.forward(*[j.data for j in x], **kwargs), op = self(saved = [*x], ctx = list(kwargs.values())))
+    _op = self(saved = [*x], ctx = list(kwargs.values()))
+    out = tensor(self.forward(*[j.data for j in x], **kwargs), op = _op)
     if DEBUG: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
@@ -38,44 +30,28 @@ import tinychad.ops as ops
 
 # **** TENSOR CLASS ****
 class tensor: 
-  __slots__ = "data", "requires_grad", "op", "grad"
-  def __init__(self, data: Union[np.ndarray, LazyBuffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
-    # need a backend config class
-    if LLVM: backend=Compiled.LLVM
-    elif CUDA: backend=Compiled.CUDA
-    else: backend= Interpreted.CPU
+  __slots__ = "data", "requires_grad", "grad", "op"
+  def __init__(self, data: Union[np.ndarray, Buffer, int, float, list], op:ops.OP = LoadOPS.LOAD, requires_grad:Optional[bool] = None):
 
-    if backend in Compiled or LAZY:
-      if isinstance(data, LazyBuffer): self.data, self.data.backend = data, backend
-      else:
-        self.data = LazyBuffer(data.shape, op, None, data, backend=backend)
-    elif backend in Interpreted:
-      if isinstance(data, Buffer): self.data = data
-      else:
-        self.data = Buffer(data, op, backend=backend)
-    else: 
-        raise RuntimeError(f"cannot create tesnor from {data} on {backend}")
-      
-
+    # method for creating buffers
+    self.data = Buffer.read_load(data) if not isinstance(data, Buffer) else data
     self.grad, self.requires_grad, self.op = None, requires_grad, op
+    
+  @staticmethod
+  def ones(*shape, **kwargs): return tensor(Buffer.const_load(shape, arg=1), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs): return tensor(np.ones(*shape, dtype=np.float32), **kwargs)
+  def zeros(*shape, **kwargs): return tensor(Buffer.const_load(shape, arg=0), op = LoadOPS.CONST, **kwargs)
 
   @staticmethod
-  def randn(*shape, **kwargs): return tensor(np.random.randn(*shape).astype(np.float32), **kwargs)
+  def randn(*shape, **kwargs): return tensor(Buffer.rand_load(shape), op = LoadOPS.RAND, **kwargs)
 
   @staticmethod 
-  def arange(size, **kwargs): return tensor(np.arange(size, dtype=np.float32), **kwargs)
+  def arange(size, **kwargs): return tensor(Buffer.read_load(np.arange(size, dtype=np.float32)), op = LoadOPS.READ, **kwargs)
 
   @staticmethod
-  def eye(shape, **kwargs): return tensor(np.eye(shape, dtype=np.float32), **kwargs)
-
-  @staticmethod
-  def zeros(*shape, **kwargs): return tensor(np.zeros(*shape, dtype=np.float32), **kwargs)
-
-  @staticmethod
-  def uniform(*shape,hi=1,lo=-1,**kwargs): return tensor(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32), **kwargs)
+  def uniform(*shape,hi=1,lo=-1,**kwargs): 
+    return tensor(Buffer.read_load(np.random.uniform(size=shape, low=lo, high=hi).astype(np.float32)), op = LoadOPS.READ,  **kwargs)
 
   @staticmethod
   def kaiming_uniform(*shape, a=0.01, **kwargs): 
@@ -95,7 +71,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}] on {self.data.backend}>"
+    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -123,6 +99,7 @@ class tensor:
   def mul(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.MUL, x, reverse)
   def div(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.DIV, x, reverse)
   def cmp(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.CMP, x, reverse)
+  def gtt(self, x:Union[tensor, float, int], reverse=False) -> tensor: return self.cast_op(ops.GT, x, reverse)
   def dot(self, x:Union[tensor, float, int], reverse=False) -> tensor: return ops.MATMUL.apply(self, x) if reverse == False else ops.MATMUL.apply(x, self)
 
   # unary ops
@@ -167,12 +144,13 @@ class tensor:
     arg = tensor.arange(self.shape[axis] if axis != None else np.prod(self.shape)).reshape(*shape).cast_to(self.shape)
     return (self.max(axis=axis, keepdim=True).cmp(self)).mul(arg).sum(axis=axis)
 
-  def detach(self) -> np.ndarray: 
-    if not self.realized(): 
-      self.exec()
-    return self.data.data
-
   def reciprocal(self) -> tensor: return 1 / self
+
+  def realize(self) -> tensor: 
+    self.data.realize()
+    return self
+
+  def detach(self) -> np.ndarray: return self.data.data
 
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
@@ -280,7 +258,7 @@ class tensor:
     def _toposort(s): 
       if s not in vis: 
         vis.append(s)
-        if s.op != LoadOPS.LOAD:
+        if s.data.op not in LoadOPS:
           for child in s.op.saved: 
             _toposort(child)
           topo.append(s)
@@ -364,17 +342,7 @@ class tensor:
   # and create all the numpy buffers -> pass them in as void pointers
   # whats important is that we preserve the ordering of the cache
 
-  def exec(self) -> tensor:
-    if not self.realized():
-      self.data = self.data.exec()
-      return self
-    else: return self
-
-  def typecast(self, dtype): return self.detach().astype(dtype)
-  
-  # if LazyBuffer has data it is realized
-  def realized(self) -> bool: 
-    return self.data.realized()
+  def draw_graph(self): generate_graph(self.data)
 
 # for NN layers the optimizer will set requires_grad to True from statedict
 class Linear: 
@@ -384,7 +352,7 @@ class Linear:
     self.b = tensor.uniform(out_shape, lo=-bound, hi=bound) if bias else None
 
   def __call__(self, x: tensor) -> tensor: 
-    return x.dot(self.w).add(self.b)
+    return x.dot(self.w).add(self.b) if self.b is not None else x.dot(self.w)
 
 class Conv2d: 
   def __init__(self, in_channels, out_channels, kernel_size:Union[Tuple[int, int], int], padding=0, stride=1, bias=True):
