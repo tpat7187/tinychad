@@ -9,8 +9,10 @@ goals:
 TODO: 
   * rewrite frontend and allow for simple graph opts on the computation graph
     * elementwise kernel fusion
-    * reshapes dont make copies
+    * merge reshapes into buffers so we dont need to make copies
   * write tokenizier for computation graph nodes
+  * write backend as a set of passes (tokenization -> codegen) so we can use LRU cache
+  * Compiled MNIST
   * state dict for transfer learning
 
 ## how to chad
