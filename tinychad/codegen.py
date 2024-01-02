@@ -30,7 +30,7 @@ class ExecuteCProgram:
 
 
 class C_Codegen:  
-  KERNEL_HEADER = "#import <math.h>\n#define max(x,y) ((x) >= (y)) ? (x) : (y)"
+  KERNEL_HEADER = "#import <math.h>\n#define max(x,y) ((x) >= (y)) ? (x) : (y)\n#define relu(x) (x > 0 ? x : 0)\n"
 
   op_map = { 
     BinaryOPS.ADD: lambda tok1, tok2: f"{tok1} + {tok2}",
@@ -41,7 +41,8 @@ class C_Codegen:
     UnaryOPS.LOG: lambda tok1: f"log({tok1})",
     UnaryOPS.EXP: lambda tok1: f"exp({tok1})",
     UnaryOPS.SQRT: lambda tok1: f"sqrt({tok1})",
-    UnaryOPS.RELU: lambda tok1: f"({tok1} > 0 ? {tok1} : 0)",
+    UnaryOPS.RELU: lambda tok1: f"relu({tok1})",
+    UnaryOPS.NEG: lambda tok1: f"-{tok1}"
   }
 
   def __init__(self, fxn_token): 
@@ -79,10 +80,7 @@ class C_Codegen:
     elif token.arg == TokenType.LOCAL:
       for child in token.src:
         expr = self.generate_kernel(child)
-      if token.reg in self.loads:
-        cg = f"{token.reg} = {expr};"
-      else: 
-        cg = f"float {token.reg} = {expr};"
+      cg = f"{token.reg if token.reg in self.loads else 'float ' + token.reg} = {expr};"
       self.lines.append(cg)
 
     elif token.arg == TokenType.OP:

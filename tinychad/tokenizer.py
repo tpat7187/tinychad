@@ -104,7 +104,7 @@ class Tokenizer:
       if gbl: 
         self.e(gbl, self.global_store(st, self.index(self.output_args, out_idx)))
       else:
-        self.e(lcl, self.global_store(st, self.index(self.output_args, out_idx)))
+        self.e(self.fxn, self.global_store(st, self.index(self.output_args, out_idx)))
 
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
