@@ -90,8 +90,7 @@ class C_Codegen:
         lines.append(cg)
 
       elif tok.type == TokenType.ACC: 
-        # I dont really like this, its too hacky
-        cg = f"{tok.args[1].reg} += {tok.args[0].args[0]}[{tok.args[0].args[1].reg}];"
+        cg = f"{tok.args[1].reg} += {tok.args[0].reg};"
         lines.append(cg)
 
     kern = '\n'.join(lines)

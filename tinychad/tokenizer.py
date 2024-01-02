@@ -16,16 +16,25 @@ Loop Unrolling
 
 summing a 5x5 matrix with axis = None
 
-void SUM_5_5(float* buffer0, float* buffer1){ 
-   float acc0; 
-   for (int idx0=0 ; idx0 < 25; idx0++) { 
-    acc0 += buffer0[idx0]
-   }
-   buffer1[0] = acc0; 
+2 FOR LOOPS
+void SUM_5_7_0(float* buffer0, float* buffer1){ 
+  for (int idx0 = 0; idx0 < 7; idx0++ ) { 
+    float acc0 = 0; 
+    // Sum over each row in the current column (5 rows)
+    for (int idx1 = 0; idx1 < 5; idx1++) {
+      acc0 += buffer0[idx1 * 7 + idx0]; 
+    }
+    buffer1[idx0] = acc0; 
+  }
 }
 
+[1., 1., 1., 1., 1., 1., 1.],
+[1., 1., 1., 1., 1., 1., 1.],
+[1., 1., 1., 1., 1., 1., 1.],
+[1., 1., 1., 1., 1., 1., 1.],
+[1., 1., 1., 1., 1., 1., 1.]])
 
-
+array([5., 5., 5., 5., 5.])
 '''
 
 class Token: 
@@ -69,21 +78,52 @@ class Tokenizer:
     self.generate_function() 
 
     # if the axis is between the two we add a second loop, otherwise we start the acc
+
     if self.op in ShapeOPS: 
-      self.axis = self.buf.ctx[0]
-      iters = np.prod(self.in_s) if not self.axis else np.prod(self.buf.shape)
+      self.axis = self.buf.ctx[0] 
+      self.strides = self.buf.children[0].strides
+
+      gbl = np.prod(self.out_s) if self.axis is not None else 0
+      local_loops = 1 if self.axis is None else 2 if 0 < self.axis < len(self.in_s[0])-1 else 1
+
+      if gbl != 0:
+        self.tokenize_loop(0, gbl, 1)
       acc = self.tokenize_start_acc()
-      loop = self.tokenize_loop(0, iters, 1)
-      idx = self.index(self.input_args[0], loop)
+
+      for _ in range(local_loops):
+        lcl = self.in_s[0][self.axis] if self.axis is not None else np.prod(self.in_s[0])
+        self.tokenize_loop(0, lcl, 1)
+
+      '''
+      axis=0: idx0*1 + idx1*7
+      axis=1: idx0*7 + idx1*1
+      '''
+
+      if self.axis is not None:
+        tt = []
+        reversed_strides = self.strides if self.axis == 0 else self.strides[::-1]
+        for i in range(len(self.loops)):
+          stride = reversed_strides[i]
+          tt.append(f"{self.loops[i].reg}*{stride}")
+        tt = ' + '.join(tt)
+      else: 
+        tt = self.loops[0].reg
+
+      idx = self.index(self.input_args[0], tt)
       self.tokenize_acc(idx, acc)
+
+      if gbl > 0: 
+        self.e(Token(TokenType.LOOPSTOP))
+
+      self.tokenize_store(acc, self.tokenize_literal(0) if self.axis is None else self.loops[0])
+
       self.e(Token(TokenType.LOOPSTOP))
-      self.tokenize_store(acc, self.tokenize_literal(0))
+
 
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
       self.tokenize_loop(st, iters, inc) 
       self.tokenize_operation(self.loops[0])
-      # this sucks
       for _ in self.loops:
         self.e(Token(TokenType.LOOPSTOP))
 
@@ -98,7 +138,7 @@ class Tokenizer:
     return load_tok
 
   def index(self, buffer, index): 
-    index_tok = Token(TokenType.INDEX, args=[buffer, index])
+    index_tok = Token(TokenType.INDEX, args=[buffer, index], reg = f"{buffer}[{index}]")
     return index_tok
 
   def tokenize_loop(self, st, iters, inc):
