@@ -128,6 +128,7 @@ class Buffer:
         if not f._realized(): f.realize() 
     tok = Tokenizer(self) 
     self.alloc() 
+    exit(1)
     ExecuteCProgram(tok.kernel, self, tok.fxn_name).run()
 
   def _realized(self): return self.data is not None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np 
-from typing import Union, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Union, List, Optional, Tuple, Any
 from enum import Enum, auto
 from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, TokenType, Ops
 from tinychad.helpers import DEBUG
@@ -14,12 +15,32 @@ Constant Folding
 
 '''
 
+@dataclass(repr=False)
 class Token: 
-  codegen: str = ""
-  def __init__(self, _type:TokenType, args:Optional[List[Token]]=None, reg:str=None): 
-    self.type, self.args, self.reg = _type, args, reg
+  arg:TokenType
+  src:List[Union[Token, int]]
+  reg:Optional[str]=""
+  ctx:Optional[Any]=None
 
-  def __repr__(self): return f"TOKEN: {self.type} {self.args}"
+
+  def __repr__(self, level=0, is_last=True, prefix=""):
+    if level > 0:
+      connector = "┗━ " if is_last else "┣━ "
+    else:
+      connector = ""
+    curr_prefix = f"{prefix}{connector}"
+    token_repr = f"{curr_prefix}{self.arg} {self.reg}\n"
+    if level > 0:
+      prefix += "    " if is_last else "┃   "
+    for i, src_item in enumerate(self.src):
+      is_last_child = (i == len(self.src) - 1)
+      if isinstance(src_item, Token):
+        token_repr += src_item.__repr__(level + 1, is_last_child, prefix)
+      else:
+        child_connector = "┗━ " if is_last_child else "┣━ "
+        token_repr += f"{prefix}{child_connector}{src_item}\n"
+    return token_repr
+
 
 # buffer_stream -> token_stream per buffer
 class Tokenizer:
@@ -36,6 +57,9 @@ class Tokenizer:
 
     self.input_args:List[str] = self.buf_names[:self.inputs]
     self.output_args:List[str] = self.buf_names[self.inputs:][0]
+    
+    self.open_loops:int = 0 
+    self.open_ll:int = 0 
 
     self.out_s = self.buf.shape
     for i in self.buf.children:
@@ -43,19 +67,18 @@ class Tokenizer:
         self.in_s = [self.in_s] if not isinstance(self.in_s, list) else self.in_s
         self.in_s.append(i.shape)
 
+    self.fxn:Token
+
     self.tokenize_buffer()
 
-    if DEBUG: 
-      for _ in self.token_stream: 
-        print(_)
+    if DEBUG: print(self.fxn)
 
-    self.kernel = C_Codegen(self.token_stream).kernel
+    #self.kernel = C_Codegen(self.token_stream).kernel
 
   def tokenize_buffer(self):
     self.generate_function() 
 
     # if the axis is between the two we add a second loop, otherwise we start the acc
-
     if self.op in ShapeOPS: 
       self.axis = self.buf.ctx[0] 
       self.strides = self.buf.children[0].strides
@@ -70,11 +93,6 @@ class Tokenizer:
       for _ in range(local_loops):
         lcl = self.in_s[0][self.axis] if self.axis is not None else np.prod(self.in_s[0])
         self.tokenize_loop(0, lcl, 1)
-
-      '''
-      axis=0: idx0*1 + idx1*7
-      axis=1: idx0*7 + idx1*1
-      '''
 
       if self.axis is not None:
         tt = []
@@ -94,6 +112,45 @@ class Tokenizer:
 
       self.tokenize_store(acc, self.tokenize_literal(0) if self.axis is None else self.loops[0])
 
+    if self.op in BinaryOPS or self.op in UnaryOPS:
+      st, iters, inc = 0, self.buf.size, 1
+      lcl = self.tokenize_loop(st, iters, inc) 
+      self.e(self.fxn, lcl)
+      children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.ctx[2])]
+      st = self.local_store(self.tokenize_operation(children))
+      self.e(lcl, st)
+      gbl = self.global_store(st, self.index(self.output_args, lcl.reg))
+      self.e(lcl, gbl)
+
+  def tokenize_loop(self, st, iters, inc):
+    assert st >= 0 and iters > 0 
+    loop_name = f"idx{self.open_loops}"
+    _tok = Token(arg=TokenType.LOOPSTART, src = [], reg=loop_name, ctx=[st, iters, inc])
+    self.open_loops +=1
+    return _tok
+
+  def local_store(self, to_store:Token): 
+    local_register = f'b{self.open_ll}'
+    _tok = Token(arg=TokenType.LOCAL, src = [], reg=local_register) 
+    self.e(_tok, to_store)
+    return _tok
+
+  def global_store(self, to_store:Token, store_reg:Token, index:Optional[Union[Token, int]]=None): 
+    _tok = Token(arg=TokenType.GLOBAL, src = [store_reg, to_store.reg])
+    return _tok
+
+  def index(self, buffer, index): 
+    index_tok = Token(arg=TokenType.INDEX, src=[], reg=f"{buffer}[{index}]")
+    return index_tok
+
+  def e(self, parent:Token, child:Token): 
+    parent.src.append(child)
+
+  def tokenize_operation(self, _in:List[Token], store_reg:Optional[Token]=None):
+    op_tok = Token(arg=TokenType.OP, src = _in, reg = self.op) 
+    return op_tok
+
+    '''
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
       lcl = self.tokenize_loop(st, iters, inc) 
@@ -137,28 +194,16 @@ class Tokenizer:
     self.e(_tok) 
     return _tok
 
-  def tokenize_local(self, _tok:Token): 
-    _tok = Token(TokenType.LOCAL, args = _tok, reg = f"b{len(self.local_stores)}")
-    self.e(_tok)
-    return _tok
-  
   def tokenize_start_acc(self): 
     acc_tok = Token(TokenType.DEFINE_ACC)
     acc_tok.reg = f"acc0" 
     self.e(acc_tok)
     return acc_tok
 
-  def e(self, token:Token): 
-    self.token_stream.append(token)
-
   def tokenize_operation(self, reg:List[Token], store_reg:Optional[Token]=None):
     op_tok = Token(TokenType.OP, args = [self.op, reg]) 
     return op_tok
-
-  # will take reg of token and store it in another place
-  def tokenize_store(self, _tok:Token, store_idx:Token):
-    global_store = Token(TokenType.GLOBAL, args = [_tok, store_idx], reg = self.output_args)
-    self.e(global_store)
+  '''
 
   # return FUNCSTART TOKEN
   def generate_function(self): 
@@ -166,13 +211,12 @@ class Tokenizer:
     self.op = op_name
     # TODO: add something to stop the matmul
     if op_name in UnaryOPS or op_name in BinaryOPS: 
-      self.fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.buf.shape])}"
-      _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, self.buf_names])
-      self.e(_tok) 
+      fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.buf.shape])}"
+      _tok = Token(arg=TokenType.FUNCTION, src=[], reg=fxn_name)
+      self.fxn = _tok
     elif op_name in ShapeOPS:
       in_s, axis = self.buf.children[0].shape, self.buf.ctx[0]
       self.fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in in_s])}{'_' + str(axis) if axis is not None else ''}"
-      _tok = Token(TokenType.FUNCSTART, args = [self.fxn_name, self.buf_names])
-      self.e(_tok) 
+      _tok = Token(TokenType.FUNCTION, args = [], reg=fxn_name)
 
 
