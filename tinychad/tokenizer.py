@@ -61,11 +61,14 @@ class Tokenizer:
     self.open_ll:int = 0 
     self.open_acc:int = 0
 
+
     self.out_s = self.buf.shape
     for i in self.buf.children:
       if self.in_s != i.shape and self.in_s is not None:
         self.in_s = [self.in_s] if not isinstance(self.in_s, list) else self.in_s
         self.in_s.append(i.shape)
+    
+    self.out_strides = self.buf.strides
 
     self.fxn:Token = None
 
@@ -87,10 +90,9 @@ class Tokenizer:
       else: blocked = False
 
       if blocked:
-        gbl_size = self.in_s[0][0]
-      else:
-        gbl_size = np.prod(self.out_s) if self.axis is not None else 0
-
+        gbl_size = np.prod(self.in_s[0][:self.axis]) if self.axis is not None else 0
+      else: 
+        gbl_size = np.prod(self.out_s)
       local_loops = 1 if self.axis is None else 2 if blocked else 1
       gbl = self.tokenize_loop(0, gbl_size, 1) if gbl_size else None
       acc = self.tokenize_start_acc(parent = gbl) if local_loops == 1 else None
@@ -98,34 +100,37 @@ class Tokenizer:
         if self.axis is not None: 
           lcl = self.tokenize_loop(0, np.prod(self.in_s[0][self.axis]), 1, parent = gbl) 
         else: lcl = self.tokenize_loop(0, np.prod(self.in_s[0]), 1, parent = gbl) 
-      elif local_loops > 1: 
-        for _ in range(local_loops):
-          self.tokenize_loop(0, self.in_s[0][::-1][_], 1, parent=self.open_loops[-1])
-        lcl = self.open_loops[-1]
-        acc = self.tokenize_start_acc(parent = self.open_loops[1])
+      elif blocked:
+          self.tokenize_loop(0, self.strides[::-1][self.axis], 1, parent=self.open_loops[-1])
+          self.tokenize_loop(0, self.in_s[0][self.axis], 1, parent=self.open_loops[-1])
+      lcl = self.open_loops[-1]
+      acc = self.tokenize_start_acc(parent = self.open_loops[1]) if local_loops > 1 else acc
 
+      # this sucks
       if self.axis is not None: 
-        statements = []
-        if blocked:
-          shifted_strides = tuple(np.roll(self.strides, self.axis))
-          for _ in range(len(self.open_loops)):
-            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[_]}")
-        else:
+        statements = [] 
+        if blocked: 
+          statements.append(f"({self.open_loops[0].reg}*{self.strides[::-1][self.axis-1]})")
+          statements.append(f"({self.open_loops[1].reg})")
+          statements.append(f"({self.open_loops[-1].reg}*{self.strides[::-1][self.axis]})")
+          indx = ' + '.join(statements)
+        else: 
           for _ in range(len(self.open_loops)):
             shifted_strides = tuple(np.roll(self.strides, _))
-            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
-        indx = ' + '.join(statements)
+            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[self.axis]}")
+          indx = ' + '.join(statements)
       else: 
         indx = lcl.reg
 
       st = self.local_store(self.tokenize_operation([acc.reg, self.index(self.input_args[0], indx)], op = op_reduce), acc.reg)
       self.e(lcl, st)
 
+      # this also sucks
       if blocked: 
         statements = []
-        for _ in range(len(self.open_loops)-1):
-          statements.append(f"{self.open_loops[_].reg}*{self.strides[:len(self.open_loops)-1][::-1][_]}")
-        blocked_idx = ' + '.join(statements)
+        statements.append(f"{self.open_loops[0].reg}*{self.strides[::-1][self.axis]}")
+        statements.append(f"{self.open_loops[1].reg}")
+      blocked_idx = ' + '.join(statements)
 
       out_idx = 0 if self.axis is None else gbl.reg
       if gbl: 
