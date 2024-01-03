@@ -70,6 +70,7 @@ class Tokenizer:
     self.fxn:Token = None
 
     self.tokenize_buffer()
+
     if DEBUG: print(self.fxn)
 
   def tokenize_buffer(self):
@@ -81,18 +82,38 @@ class Tokenizer:
       self.axis = self.buf.ctx[0] 
       self.strides = self.buf.children[0].strides
 
-      gbl_size = np.prod(self.out_s) if self.axis is not None else 0
-      local_loops = 1 if self.axis is None else 2 if 0 < self.axis < len(self.in_s[0])-1 else 1
+      if self.axis is not None: 
+        blocked = True if 0 < self.axis < len(self.in_s[0])-1 else False
+      else: blocked = False
+
+      if blocked:
+        gbl_size = self.in_s[0][0]
+      else:
+        gbl_size = np.prod(self.out_s) if self.axis is not None else 0
+
+      local_loops = 1 if self.axis is None else 2 if blocked else 1
       gbl = self.tokenize_loop(0, gbl_size, 1) if gbl_size else None
-      acc = self.tokenize_start_acc(parent=gbl)
-      for _ in range(local_loops):
-        lcl = self.tokenize_loop(0, self.in_s[0][self.axis] if self.axis is not None else np.prod(self.in_s[0]), 1, parent=gbl)
+      acc = self.tokenize_start_acc(parent = gbl) if local_loops == 1 else None
+      if local_loops == 1: 
+        if self.axis is not None: 
+          lcl = self.tokenize_loop(0, np.prod(self.in_s[0][self.axis]), 1, parent = gbl) 
+        else: lcl = self.tokenize_loop(0, np.prod(self.in_s[0]), 1, parent = gbl) 
+      elif local_loops > 1: 
+        for _ in range(local_loops):
+          self.tokenize_loop(0, self.in_s[0][::-1][_], 1, parent=self.open_loops[-1])
+        lcl = self.open_loops[-1]
+        acc = self.tokenize_start_acc(parent = self.open_loops[1])
 
       if self.axis is not None: 
         statements = []
-        for _ in range(len(self.open_loops)):
-          shifted_strides = tuple(np.roll(self.strides, _))
-          statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
+        if blocked:
+          shifted_strides = tuple(np.roll(self.strides, self.axis))
+          for _ in range(len(self.open_loops)):
+            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[_]}")
+        else:
+          for _ in range(len(self.open_loops)):
+            shifted_strides = tuple(np.roll(self.strides, _))
+            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
         indx = ' + '.join(statements)
       else: 
         indx = lcl.reg
@@ -100,9 +121,18 @@ class Tokenizer:
       st = self.local_store(self.tokenize_operation([acc.reg, self.index(self.input_args[0], indx)], op = op_reduce), acc.reg)
       self.e(lcl, st)
 
+      if blocked: 
+        statements = []
+        for _ in range(len(self.open_loops)-1):
+          statements.append(f"{self.open_loops[_].reg}*{self.strides[:len(self.open_loops)-1][::-1][_]}")
+        blocked_idx = ' + '.join(statements)
+
       out_idx = 0 if self.axis is None else gbl.reg
       if gbl: 
-        self.e(gbl, self.global_store(st, self.index(self.output_args, out_idx)))
+        if blocked: 
+          self.e(self.open_loops[1], self.global_store(st, self.index(self.output_args, blocked_idx)))
+        else:
+          self.e(gbl, self.global_store(st, self.index(self.output_args, out_idx)))
       else:
         self.e(self.fxn, self.global_store(st, self.index(self.output_args, out_idx)))
 
@@ -136,8 +166,10 @@ class Tokenizer:
     index_tok = Token(arg=TokenType.INDEX, src=[], reg=f"{buffer}[{index}]")
     return index_tok
 
-  def e(self, parent:Token, child:Token): 
-    parent.src.append(child)
+  def e(self, parent:Token, child:Token, push:Optional[bool]=False): 
+    if push: parent.src.insert(0, child)
+    else:
+      parent.src.append(child)
 
   def tokenize_operation(self, _in:List[Token], op:[Optional]=None) -> Token:
     op_tok = Token(arg=TokenType.OP, src = _in, reg = self.op if op is None else op) 
@@ -149,7 +181,7 @@ class Tokenizer:
 
   def tokenize_start_acc(self, parent:Optional[Token]=None) -> Token:
     acc_tok = Token(TokenType.DEFINE_ACC, src=[], reg=f"acc{self.open_acc}")
-    self.e(parent, acc_tok) if parent else self.e(self.fxn, acc_tok)
+    self.e(parent, acc_tok, True) if parent else self.e(self.fxn, acc_tok)
     return acc_tok
 
   def generate_function(self) -> Token: 
