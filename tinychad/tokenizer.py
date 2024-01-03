@@ -92,7 +92,7 @@ class Tokenizer:
         statements = []
         for _ in range(len(self.open_loops)):
           shifted_strides = tuple(np.roll(self.strides, _))
-          statements.append(f"{self.open_loops[_].reg}*{shifted_strides[self.axis]}")
+          statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
         indx = ' + '.join(statements)
       else: 
         indx = lcl.reg
