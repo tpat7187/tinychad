@@ -61,7 +61,6 @@ class Tokenizer:
     self.open_ll:int = 0 
     self.open_acc:int = 0
 
-
     self.out_s = self.buf.shape
     for i in self.buf.children:
       if self.in_s != i.shape and self.in_s is not None:
@@ -106,18 +105,15 @@ class Tokenizer:
       lcl = self.open_loops[-1]
       acc = self.tokenize_start_acc(parent = self.open_loops[1]) if local_loops > 1 else acc
 
-      # this sucks
       if self.axis is not None: 
         statements = [] 
         if blocked: 
-          statements.append(f"({self.open_loops[0].reg}*{self.strides[::-1][self.axis-1]})")
-          statements.append(f"({self.open_loops[1].reg})")
-          statements.append(f"({self.open_loops[-1].reg}*{self.strides[::-1][self.axis]})")
-          indx = ' + '.join(statements)
+          indx = self.generate_shape_idx(self.open_loops)
+          blocked_idx = self.generate_shape_idx([self.open_loops[0], self.open_loops[1]])
         else: 
           for _ in range(len(self.open_loops)):
             shifted_strides = tuple(np.roll(self.strides, _))
-            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[self.axis]}")
+            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
           indx = ' + '.join(statements)
       else: 
         indx = lcl.reg
@@ -125,21 +121,10 @@ class Tokenizer:
       st = self.local_store(self.tokenize_operation([acc.reg, self.index(self.input_args[0], indx)], op = op_reduce), acc.reg)
       self.e(lcl, st)
 
-      # this also sucks
       if blocked: 
-        statements = []
-        statements.append(f"{self.open_loops[0].reg}*{self.strides[::-1][self.axis]}")
-        statements.append(f"{self.open_loops[1].reg}")
-      blocked_idx = ' + '.join(statements)
-
-      out_idx = 0 if self.axis is None else gbl.reg
-      if gbl: 
-        if blocked: 
-          self.e(self.open_loops[1], self.global_store(st, self.index(self.output_args, blocked_idx)))
-        else:
-          self.e(gbl, self.global_store(st, self.index(self.output_args, out_idx)))
+        self.e(self.open_loops[1], self.global_store(st, self.index(self.output_args, blocked_idx)))
       else:
-        self.e(self.fxn, self.global_store(st, self.index(self.output_args, out_idx)))
+        self.e(self.fxn if not gbl else gbl, self.global_store(st, self.index(self.output_args, 0 if self.axis is None else gbl.reg)))
 
     if self.op in BinaryOPS or self.op in UnaryOPS:
       st, iters, inc = 0, self.buf.size, 1
@@ -148,6 +133,15 @@ class Tokenizer:
       st = self.local_store(self.tokenize_operation(children))
       self.e(lcl, st)
       self.e(lcl, self.global_store(st, self.index(self.output_args, lcl.reg)))
+
+  def generate_shape_idx(self, loops:List[Token]) -> List[str]:
+    assert len(loops) > 1
+    len_loops, statements = len(loops), []
+    for _ in range(len_loops-1):
+      tt =[_ for _ in reversed(range(len_loops-1))]
+      statements.append(f"({loops[-_].reg}*{self.strides[::-1][self.axis-(tt[_])]})")
+    statements.append(f"({self.open_loops[1].reg})")
+    return ' + '.join(statements)
 
   def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None) -> Token:
     assert st >= 0 and iters > 0 
