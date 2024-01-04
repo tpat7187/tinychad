@@ -65,7 +65,9 @@ class C_Codegen:
       self.lines.append("}")  
 
     if token.arg == TokenType.DEFINE_ACC: 
-      cg = f"float {token.reg} = 0;"
+      if token.ctx == ShapeOPS.MAX: tt = "-INFINITY"
+      if token.ctx == ShapeOPS.SUM: tt = "0"
+      cg = f"float {token.reg} = {tt};"
       self.loads[token.reg] = token
       self.lines.append(cg)
       
@@ -101,14 +103,4 @@ class C_Codegen:
       self.lines.append(cg)
 
     return '\n'.join(self.lines)
-
-
-
-
-
-
-
-
-
-
 

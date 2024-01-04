@@ -84,14 +84,13 @@ class Tokenizer:
       self.axis = self.buf.ctx[0] 
       self.strides = self.buf.children[0].strides
 
-      if self.axis is not None: 
-        blocked = True if 0 < self.axis < len(self.in_s[0])-1 else False
-      else: blocked = False
+      blocked = False if self.axis is None else 0 < self.axis < len(self.in_s[0])-1
 
-      if blocked:
-        gbl_size = np.prod(self.in_s[0][:self.axis]) if self.axis is not None else 0
+      if blocked: 
+        gbl_size = np.prod(self.in_s[0][:self.axis]) 
       else: 
-        gbl_size = np.prod(self.out_s)
+        gbl_size = np.prod(self.out_s) if self.axis is not None else 0
+
       local_loops = 1 if self.axis is None else 2 if blocked else 1
       gbl = self.tokenize_loop(0, gbl_size, 1) if gbl_size else None
       acc = self.tokenize_start_acc(parent = gbl) if local_loops == 1 else None
@@ -144,7 +143,8 @@ class Tokenizer:
     return ' + '.join(statements)
 
   def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None) -> Token:
-    assert st >= 0 and iters > 0 
+    assert st >=0 
+    if iters == 0: return # dont run a loop if there are no iterations along that axis
     loop_name = f"idx{len(self.open_loops)}"
     _tok = Token(arg=TokenType.LOOP, src = [], reg=loop_name, ctx=[st, iters, inc])
     self.open_loops.append(_tok)
@@ -179,7 +179,7 @@ class Tokenizer:
     return _tok
 
   def tokenize_start_acc(self, parent:Optional[Token]=None) -> Token:
-    acc_tok = Token(TokenType.DEFINE_ACC, src=[], reg=f"acc{self.open_acc}")
+    acc_tok = Token(TokenType.DEFINE_ACC, src=[], reg=f"acc{self.open_acc}", ctx = self.op)
     self.e(parent, acc_tok, True) if parent else self.e(self.fxn, acc_tok)
     return acc_tok
 
