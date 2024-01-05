@@ -66,8 +66,7 @@ class Tokenizer:
       if self.in_s != i.shape and self.in_s is not None:
         self.in_s = [self.in_s] if not isinstance(self.in_s, list) else self.in_s
         self.in_s.append(i.shape)
-    
-    self.out_strides = self.buf.strides
+    if len(self.in_s)==1: self.in_s = self.in_s[0]
 
     self.fxn:Token = None
 
@@ -84,10 +83,10 @@ class Tokenizer:
       self.axis = self.buf.ctx[0] 
       self.strides = self.buf.children[0].strides
 
-      blocked = False if self.axis is None else 0 < self.axis < len(self.in_s[0])-1
+      blocked = False if self.axis is None else 0 < self.axis < len(self.in_s)-1
 
       if blocked: 
-        gbl_size = np.prod(self.in_s[0][:self.axis]) 
+        gbl_size = np.prod(self.in_s[:self.axis]) 
       else: 
         gbl_size = np.prod(self.out_s) if self.axis is not None else 0
 
@@ -96,11 +95,11 @@ class Tokenizer:
       acc = self.tokenize_start_acc(parent = gbl) if local_loops == 1 else None
       if local_loops == 1: 
         if self.axis is not None: 
-          lcl = self.tokenize_loop(0, np.prod(self.in_s[0][self.axis]), 1, parent = gbl) 
-        else: lcl = self.tokenize_loop(0, np.prod(self.in_s[0]), 1, parent = gbl) 
+          lcl = self.tokenize_loop(0, np.prod(self.in_s[self.axis]), 1, parent = gbl) 
+        else: lcl = self.tokenize_loop(0, np.prod(self.in_s), 1, parent = gbl) 
       elif blocked:
           self.tokenize_loop(0, self.strides[::-1][self.axis], 1, parent=self.open_loops[-1])
-          self.tokenize_loop(0, self.in_s[0][self.axis], 1, parent=self.open_loops[-1])
+          self.tokenize_loop(0, self.in_s[self.axis], 1, parent=self.open_loops[-1])
       lcl = self.open_loops[-1]
       acc = self.tokenize_start_acc(parent = self.open_loops[1]) if local_loops > 1 else acc
 
@@ -133,6 +132,16 @@ class Tokenizer:
       self.e(lcl, st)
       self.e(lcl, self.global_store(st, self.index(self.output_args, lcl.reg)))
 
+    if self.op == ReshapeOPS.CAST: 
+      self.strides = self.buf.strides
+      axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
+      [self.tokenize_loop(0, _, 1, parent=self.open_loops[-1] if len(self.open_loops) >= 1 else None) for _ in self.out_s]
+      st = ' + '.join([f"{j.reg}*{self.strides[i]}" for i,j in enumerate(reversed(self.open_loops))])
+      input_index = self.index(self.input_args[0], self.open_loops[-1].reg)
+      output_index = self.index(self.output_args, st)
+      gbl = self.global_store(input_index, output_index)
+      self.e(self.open_loops[-1], gbl)
+
   def generate_shape_idx(self, loops:List[Token]) -> List[str]:
     assert len(loops) > 1
     len_loops, statements = len(loops), []
@@ -154,6 +163,7 @@ class Tokenizer:
   def local_store(self, to_store:Token, register:Optional[Token]=None) -> Token:
     if not register: register = f'b{self.open_ll}'
     _tok = Token(arg=TokenType.LOCAL, src = [], reg=register) 
+    self.open_ll +=1
     self.e(_tok, to_store)
     return _tok
 
@@ -181,6 +191,7 @@ class Tokenizer:
   def tokenize_start_acc(self, parent:Optional[Token]=None) -> Token:
     acc_tok = Token(TokenType.DEFINE_ACC, src=[], reg=f"acc{self.open_acc}", ctx = self.op)
     self.e(parent, acc_tok, True) if parent else self.e(self.fxn, acc_tok)
+    self.open_acc += 1
     return acc_tok
 
   def generate_function(self) -> Token: 
@@ -188,12 +199,50 @@ class Tokenizer:
     self.op = op_name
     # TODO: add something to stop the matmul
     if op_name in UnaryOPS or op_name in BinaryOPS: 
-      fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.buf.shape])}"
+      fxn_name  = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.out_s])}"
       _tok = Token(arg=TokenType.FUNCTION, src=[], reg=fxn_name, ctx=self.buf_names)
     elif op_name in ShapeOPS:
-      in_s, axis = self.buf.children[0].shape, self.buf.ctx[0]
-      fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in in_s])}{'_' + str(axis) if axis is not None else ''}"
+      axis = self.buf.ctx[0]
+      fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.in_s])}{'_' + str(axis) if axis is not None else ''}"
+      _tok = Token(arg=TokenType.FUNCTION, src = [], reg=fxn_name, ctx=self.buf_names)
+    elif op_name in ReshapeOPS:
+      fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.in_s])}{''.join(['_' + str(j) for j in self.out_s])}"
       _tok = Token(arg=TokenType.FUNCTION, src = [], reg=fxn_name, ctx=self.buf_names)
     return _tok
 
 
+  '''
+
+  void ADD_2_3(float* buffer0, float* buffer1, float* buffer2) {
+    for (int idx0 = 0; idx0 < 6; idx0 += 1) {
+    float b0 = buffer0[idx0] + buffer1[idx0];
+    buffer2[idx0] = b0;
+    }
+  }
+
+  void ADD_2_3(float* buffer0, float* buffer1, float* buffer2) {
+    for (int idx0 = 0; idx0 < 3; idx0 += 1) {
+    float b0 = buffer0[idx0*2] + buffer1[idx0*2];
+    float b1 = buffer0[idx0*2+1] + buffer1[idx0*2+1];
+    buffer2[idx0*2] = b0;
+    buffer2[idx0*2+1] = b1;
+  }
+  '''  
+
+  def unroll_loops(self):
+    for loop in self.open_loops: 
+      st, iter, end = loop.ctx
+      new_st, new_iter, new_end = 0, 3, 1
+
+      # look for indexes
+      # push indexes over by new amount
+      # replicate children
+      self.unroll_chilren(loop)
+
+  def unroll_chilren(self, _tok:Token): 
+    if isinstance(_tok, Token):
+      if _tok.arg != TokenType.INDEX and len(_tok.src) > 0:
+        for child in _tok.src: 
+          self.unroll_chilren(child)
+      else: 
+        print('g')
