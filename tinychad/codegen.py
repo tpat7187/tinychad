@@ -49,9 +49,10 @@ class C_Codegen:
     self.fxn_token = fxn_token
     self.lines:List[str] = [self.KERNEL_HEADER]
     self.loads = {}
-
     self.kernel = self.generate_kernel(fxn_token)
-    print(self.kernel)
+
+    if DEBUG: 
+      print(self.kernel)
 
   def generate_kernel(self, token):
     if not isinstance(token, Token): 

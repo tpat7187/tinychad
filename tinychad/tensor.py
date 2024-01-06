@@ -121,7 +121,6 @@ class tensor:
   def cast(self, args): return self.reshape_op(ops.CAST, args=args)
 
   def reshape_op(self, fxn:ops.OP, *args:tensor, lazy:Optional[bool] = False, **kwargs) -> tensor: 
-    print(kwargs)
     return fxn.apply(self, **kwargs, lazy=lazy)
 
   def T(self) -> tensor: return tensor(self.data.transpose())

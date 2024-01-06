@@ -3,7 +3,6 @@ import inspect, os, shlex
 from typing import Union, Optional, Tuple
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
 import networkx as nx
-import matplotlib.pyplot as plt
 
 # blocks will be object -> several Linear/Conv2d/BatchNorm -> tensor, tensor
 # increase depth of tensor search 
