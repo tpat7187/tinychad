@@ -53,7 +53,9 @@ class Buffer:
 
   def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
   def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
-  def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+  def shape_op(self, fxn, axis, keepdim) -> Buffer: 
+    if axis < 0: axis = np.arange(len(self.shape))[axis]
+    return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
   def reshape_op(self, fxn, args) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
   # a Buffer is realized if its data is not None
@@ -131,6 +133,7 @@ class Buffer:
     kernel = C_Codegen(tokenizer.fxn).kernel
     self.alloc() 
     ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
+
 
   def _realized(self): return self.data is not None
 

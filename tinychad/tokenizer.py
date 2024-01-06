@@ -133,11 +133,11 @@ class Tokenizer:
       self.e(lcl, self.global_store(st, self.index(self.output_args, lcl.reg)))
 
     if self.op == ReshapeOPS.CAST: 
-      output_stride, input_stride = self.buf.strides, self.buf.children[0].strides
+      output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
       [self.tokenize_loop(0, _, 1, parent=self.open_loops[-1] if len(self.open_loops) >= 1 else None) for _ in self.out_s]
       output_st = ' + '.join([f"{j.reg}*{output_stride[i]}" for i,j in enumerate(reversed(self.open_loops))])
-      input_st = ' + '.join([f"{j.reg}*{input_stride[i]}" for i,j in enumerate(reversed(self.open_loops)) if i not in axis])
+      input_st = ' + '.join([f"{j.reg}*{input_stride[i]}" for i,j in enumerate(self.open_loops) if i not in axis])
       input_index = self.index(self.input_args[0], input_st)
       output_index = self.index(self.output_args, output_st)
       gbl = self.global_store(input_index, output_index)
