@@ -61,6 +61,9 @@ class Tokenizer:
     self.open_ll:int = 0 
     self.open_acc:int = 0
 
+    # if any children are not contiguous we perform opps elementwise ops by axis instead of by element
+    self.contiguous_op = all(_.is_contiguous() for _ in self.buf.children)
+
     self.out_s = self.buf.shape
     for i in self.buf.children:
       if self.in_s != i.shape and self.in_s is not None:
@@ -124,18 +127,29 @@ class Tokenizer:
       else:
         self.e(self.fxn if not gbl else gbl, self.global_store(st, self.index(self.output_args, 0 if self.axis is None else gbl.reg)))
 
+    # TODO: refactor
     if self.op in BinaryOPS or self.op in UnaryOPS:
-      st, iters, inc = 0, self.buf.size, 1
-      lcl = self.tokenize_loop(st, iters, inc) 
-      children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.ctx[2])]
+      if not self.contiguous_op:
+        src_stride = [_.strides[::-1] for _ in self.buf.children]
+        for i in self.buf.shape:
+          lcl = self.tokenize_loop(0, i, 1, nested=True)
+        children = []
+        for x in range(self.inputs*lcl.ctx[2]):
+          st = ' + '.join([f"{j.reg}*{src_stride[x][i]}" for i,j in enumerate(self.open_loops)])
+          children.append(self.index(self.input_args[x], st))
+      else:
+        lcl = self.tokenize_loop(0, self.buf.size, 1) 
+        children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.ctx[2])]
       st = self.local_store(self.tokenize_operation(children))
       self.e(lcl, st)
-      self.e(lcl, self.global_store(st, self.index(self.output_args, lcl.reg)))
+      out_st = ' + '.join([f"{j.reg}*{self.buf.strides[::-1][i]}" for i,j in enumerate(self.open_loops)]) if not self.contiguous_op else lcl.reg
+      self.e(lcl, self.global_store(st, self.index(self.output_args, out_st)))
 
+    # we can probably repurpose this for PAD as they're both expand operations
     if self.op == ReshapeOPS.CAST: 
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
-      [self.tokenize_loop(0, _, 1, parent=self.open_loops[-1] if len(self.open_loops) >= 1 else None) for _ in self.out_s]
+      [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
       output_st = ' + '.join([f"{j.reg}*{output_stride[i]}" for i,j in enumerate(reversed(self.open_loops))])
       input_st = ' + '.join([f"{j.reg}*{input_stride[i]}" for i,j in enumerate(self.open_loops) if i not in axis])
       input_index = self.index(self.input_args[0], input_st)
@@ -152,13 +166,15 @@ class Tokenizer:
     statements.append(f"({self.open_loops[1].reg})")
     return ' + '.join(statements)
 
-  def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None) -> Token:
+  def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None, nested:Optional[bool]=False) -> Token:
     assert st >=0 
     if iters == 0: return # dont run a loop if there are no iterations along that axis
     loop_name = f"idx{len(self.open_loops)}"
     _tok = Token(arg=TokenType.LOOP, src = [], reg=loop_name, ctx=[st, iters, inc])
+    if parent: self.e(parent, _tok) 
+    elif nested and len(self.open_loops) >=1: self.e(self.open_loops[-1], _tok)
+    else: self.e(self.fxn, _tok)
     self.open_loops.append(_tok)
-    self.e(parent, _tok) if parent else self.e(self.fxn, _tok)
     return _tok
 
   def local_store(self, to_store:Token, register:Optional[Token]=None) -> Token:
