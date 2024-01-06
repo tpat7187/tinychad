@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, math, ctypes, subprocess, tempfile
 import numpy as np 
 from typing import Union, Tuple, Optional, List, Dict
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Ops
 from tinychad.tokenizer import Tokenizer
 from tinychad.codegen import ExecuteCProgram, C_Codegen
 
@@ -35,10 +35,9 @@ OPT = os.getenv("OPT", 0)
 
 # maybe we just use buffers for kernel fusion and ast gen ;) 
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides"
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
-
       self.strides = ViewTracker.generate_strides(shape)
 
   @property 
@@ -50,14 +49,29 @@ class Buffer:
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
-
   def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
   def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
-  def shape_op(self, fxn, axis, keepdim) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
-  def reshape_op(self, fxn, args) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
+  def shape_op(self, fxn, axis, keepdim) -> Buffer: 
+    if axis < 0: axis = np.arange(len(self.shape))[axis]
+    return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+  def reshape_op(self, fxn:Ops, args) -> Buffer: 
+    if fxn in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.op not in ShapeOPS:
+      return self.merge_reshape_into_e(fxn, args)
+    else: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
 
   # a Buffer is realized if its data is not None
   def realized(self:Buffer) -> bool: return self.data is not None
+
+  def is_contiguous(self:Buffer) -> bool: 
+    return all(self.strides[i+1] >= self.strides[i] for i in range(len(self.strides) - 1))
+
+  def merge_reshape_into_e(buf:Buffer, fxn, args) -> Buffer: 
+    buf.reshapes = fxn
+    buf.shape = ViewTracker.generate_view(fxn, buf, args=args)
+    if fxn == ReshapeOPS.TRANSPOSE: buf.strides = tuple([buf.strides[::-1][_] for _ in args])[::-1]
+    else: buf.strides = ViewTracker.generate_strides(buf.shape)
+    buf.ctx = args
+    return buf
 
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
@@ -81,7 +95,6 @@ class Buffer:
     if self.children: 
       for buf in self.children:
         buf._alloc()
-
 
   # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
   def merge_binary_ops(self, max_size: int = 5) -> Buffer:
@@ -122,6 +135,8 @@ class Buffer:
 
   # we should combine this with the old realize function that toposorts the non LoadOPS
   # need way of storing already generated kernels for reuse
+  # this should be done in passes: 1. Frontend OPT pass 2. Alloc pass 3. Tokenization pass 4. codegen pass
+  # fusing reshapes/transpose into ops is not an OPT, we need it to reduce shitty code from the codegenerator
   def realize(self) -> Buffer:
     for f in self.children:
       if f.op not in LoadOPS:
@@ -131,6 +146,7 @@ class Buffer:
     kernel = C_Codegen(tokenizer.fxn).kernel
     self.alloc() 
     ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
+
 
   def _realized(self): return self.data is not None
 

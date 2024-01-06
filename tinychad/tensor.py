@@ -118,7 +118,7 @@ class tensor:
   def slice(self, *args) : return self.reshape_op(ops.SLICE, args = args)
   def pad(self, args) : return self.reshape_op(ops.PAD, args = args)
   def transpose(self, *args) : return self.reshape_op(ops.TRANSPOSE, args = args)
-  def cast(self, args) : return self.reshape_op(ops.CAST, args = args)
+  def cast(self, args): return self.reshape_op(ops.CAST, args=args)
 
   def reshape_op(self, fxn:ops.OP, *args:tensor, lazy:Optional[bool] = False, **kwargs) -> tensor: 
     return fxn.apply(self, **kwargs, lazy=lazy)
