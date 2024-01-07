@@ -119,8 +119,7 @@ class Tokenizer:
       else: 
         indx = lcl.reg
 
-      st = self.local_store(self.tokenize_operation([acc.reg, self.index(self.input_args[0], indx)], op = op_reduce), acc.reg)
-      self.e(lcl, st)
+      st = self.local_store(self.tokenize_operation([acc.reg, self.index(self.input_args[0], indx)], op = op_reduce), acc.reg, parent=lcl)
 
       if blocked: 
         self.e(self.open_loops[1], self.global_store(st, self.index(self.output_args, blocked_idx)))
@@ -129,7 +128,8 @@ class Tokenizer:
 
     # TODO: refactor
     if self.op in BinaryOPS or self.op in UnaryOPS:
-      if not self.contiguous_op:
+      # unary ops do not care about stride
+      if not self.contiguous_op and self.op in BinaryOPS:
         src_stride = [_.strides[::-1] for _ in self.buf.children]
         for i in self.buf.shape:
           lcl = self.tokenize_loop(0, i, 1, nested=True)
@@ -140,21 +140,20 @@ class Tokenizer:
       else:
         lcl = self.tokenize_loop(0, self.buf.size, 1) 
         children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.ctx[2])]
-      st = self.local_store(self.tokenize_operation(children))
-      self.e(lcl, st)
+      st = self.local_store(self.tokenize_operation(children), parent=lcl)
       out_st = ' + '.join([f"{j.reg}*{self.buf.strides[::-1][i]}" for i,j in enumerate(self.open_loops)]) if not self.contiguous_op else lcl.reg
-      self.e(lcl, self.global_store(st, self.index(self.output_args, out_st)))
+      self.global_store(st, self.index(self.output_args, out_st), parent=lcl)
 
     # we can probably repurpose this for PAD as they're both expand operations
-    if self.op == ReshapeOPS.CAST: 
+    if self.op == ReshapeOPS.CAST:
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
       [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
       output_st = ' + '.join([f"{j.reg}*{output_stride[i]}" for i,j in enumerate(reversed(self.open_loops))])
       input_st = ' + '.join([f"{j.reg}*{input_stride[i]}" for i,j in enumerate(self.open_loops) if i not in axis])
-      input_index = self.index(self.input_args[0], input_st)
-      output_index = self.index(self.output_args, output_st)
-      gbl = self.global_store(input_index, output_index)
+      input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
+      lcl = self.local_store(input_index, parent=self.open_loops[-1])
+      gbl = self.global_store(lcl, output_index,parent=self.open_loops[-1])
       self.e(self.open_loops[-1], gbl)
 
   def generate_shape_idx(self, loops:List[Token]) -> List[str]:
@@ -177,15 +176,17 @@ class Tokenizer:
     self.open_loops.append(_tok)
     return _tok
 
-  def local_store(self, to_store:Token, register:Optional[Token]=None) -> Token:
+  def local_store(self, to_store:Token, register:Optional[Token]=None, parent:Optional[Token]=None) -> Token:
     if not register: register = f'b{self.open_ll}'
     _tok = Token(arg=TokenType.LOCAL, src = [], reg=register) 
     self.open_ll +=1
     self.e(_tok, to_store)
+    if parent: self.e(parent, _tok) 
     return _tok
 
-  def global_store(self, to_store:Token, store_reg:Token, index:Optional[Union[Token, int]]=None) -> Token:
+  def global_store(self, to_store:Token, store_reg:Token, parent:Optional[Token]=None) -> Token:
     _tok = Token(arg=TokenType.GLOBAL, src = [store_reg, to_store.reg])
+    if parent: self.e(parent, _tok) 
     return _tok
 
   def index(self, buffer, index) -> Token: 

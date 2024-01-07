@@ -25,7 +25,6 @@ class LoadOP:
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
 
-
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
   LoadOPS.CONST: LoadOP.alloc_const
@@ -138,6 +137,10 @@ class Buffer:
   # this should be done in passes: 1. Frontend OPT pass 2. Alloc pass 3. Tokenization pass 4. codegen pass
   # fusing reshapes/transpose into ops is not an OPT, we need it to reduce shitty code from the codegenerator
   def realize(self) -> Buffer:
+    if self.op in LoadOPS: 
+      self.alloc()
+      return self
+
     for f in self.children:
       if f.op not in LoadOPS:
         if not f._realized(): f.realize() 
@@ -146,6 +149,7 @@ class Buffer:
     kernel = C_Codegen(tokenizer.fxn).kernel
     self.alloc() 
     ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
+    return self
 
 
   def _realized(self): return self.data is not None
