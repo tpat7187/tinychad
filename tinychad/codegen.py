@@ -94,7 +94,11 @@ class C_Codegen:
       return cg
 
     elif token.arg == TokenType.INDEX: 
-      return token.reg
+      expr = [] 
+      for child in token.src: 
+        expr.append(self.generate_kernel(child))
+      cg = f"{expr[0]}[{expr[1]}]"
+      return cg
 
     elif token.arg == TokenType.GLOBAL: 
       arguments = []

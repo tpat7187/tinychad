@@ -109,13 +109,15 @@ class Tokenizer:
       if self.axis is not None: 
         statements = [] 
         if blocked: 
+          # for indexing buffer0 
           indx = self.generate_shape_idx(self.open_loops)
+          # for indexing buffer1
           blocked_idx = self.generate_shape_idx([self.open_loops[0], self.open_loops[1]])
         else: 
           for _ in range(len(self.open_loops)):
             shifted_strides = tuple(np.roll(self.strides, _))
-            statements.append(f"{self.open_loops[_].reg}*{shifted_strides[-self.axis]}")
-          indx = ' + '.join(statements)
+            statements.append(self.tokenize_operation([self.open_loops[_].reg, shifted_strides[-self.axis]], BinaryOPS.MUL))
+          indx = self.tokenize_operation([_ for _ in statements], BinaryOPS.ADD) 
       else: 
         indx = lcl.reg
 
@@ -135,13 +137,15 @@ class Tokenizer:
           lcl = self.tokenize_loop(0, i, 1, nested=True)
         children = []
         for x in range(self.inputs*lcl.ctx[2]):
-          st = ' + '.join([f"{j.reg}*{src_stride[x][i]}" for i,j in enumerate(self.open_loops)])
+          st = self.tokenize_operation([self.tokenize_operation([j.reg, src_stride[x][i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops)], BinaryOPS.ADD)
           children.append(self.index(self.input_args[x], st))
       else:
         lcl = self.tokenize_loop(0, self.buf.size, 1) 
         children = [self.index(self.input_args[x], lcl.reg) for x in range(self.inputs*lcl.ctx[2])]
-      st = self.local_store(self.tokenize_operation(children), parent=lcl)
-      out_st = ' + '.join([f"{j.reg}*{self.buf.strides[::-1][i]}" for i,j in enumerate(self.open_loops)]) if not self.contiguous_op else lcl.reg
+      st = self.local_store(self.tokenize_operation(children, self.op), parent=lcl)
+      if self.contiguous_op: out_st = lcl.reg
+      else: 
+        out_st = self.tokenize_operation([self.tokenize_operation([j.reg, self.buf.strides[::-1][i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops)], BinaryOPS.ADD) 
       self.global_store(st, self.index(self.output_args, out_st), parent=lcl)
 
     # we can probably repurpose this for PAD as they're both expand operations
@@ -149,21 +153,29 @@ class Tokenizer:
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
       [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
-      output_st = ' + '.join([f"{j.reg}*{output_stride[i]}" for i,j in enumerate(reversed(self.open_loops))])
-      input_st = ' + '.join([f"{j.reg}*{input_stride[i]}" for i,j in enumerate(self.open_loops) if i not in axis])
+      output_st = self.tokenize_operation([self.tokenize_operation([j.reg, output_stride[i]], BinaryOPS.MUL) for i,j in enumerate(reversed(self.open_loops))], BinaryOPS.ADD)
+      input_st = self.tokenize_operation([self.tokenize_operation([j.reg, input_stride[i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops) if i not in axis], BinaryOPS.ADD)
       input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
       lcl = self.local_store(input_index, parent=self.open_loops[-1])
       gbl = self.global_store(lcl, output_index,parent=self.open_loops[-1])
-      self.e(self.open_loops[-1], gbl)
+
+  # TODO: write some function to abstract away statements like
+      '''
+    output_st = self.tokenize_operation([self.tokenize_operation([j.reg, output_stride[i]], BinaryOPS.MUL) for i,j in enumerate(reversed(self.open_loops))], BinaryOPS.ADD)
+    input_st = self.tokenize_operation([self.tokenize_operation([j.reg, input_stride[i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops) if i not in axis], BinaryOPS.ADD)
+      '''
+  def MULACC(self): 
+    pass
+
 
   def generate_shape_idx(self, loops:List[Token]) -> List[str]:
     assert len(loops) > 1
     len_loops, statements = len(loops), []
     for _ in range(len_loops-1):
       tt =[_ for _ in reversed(range(len_loops-1))]
-      statements.append(f"({loops[-_].reg}*{self.strides[::-1][self.axis-(tt[_])]})")
-    statements.append(f"({self.open_loops[1].reg})")
-    return ' + '.join(statements)
+      statements.append(self.tokenize_operation([loops[-_].reg, self.strides[::-1][self.axis-(tt[_])]], BinaryOPS.MUL))
+    statements.append(self.open_loops[1].reg)
+    return self.tokenize_operation([_ for _ in statements], BinaryOPS.ADD)
 
   def tokenize_loop(self, st:int, iters:int, inc:int, parent:Optional[Token]=None, nested:Optional[bool]=False) -> Token:
     assert st >=0 
@@ -190,7 +202,7 @@ class Tokenizer:
     return _tok
 
   def index(self, buffer, index) -> Token: 
-    index_tok = Token(arg=TokenType.INDEX, src=[], reg=f"{buffer}[{index}]")
+    index_tok = Token(arg=TokenType.INDEX, src=[buffer, index])
     return index_tok
 
   def e(self, parent:Token, child:Token, push:Optional[bool]=False): 
@@ -198,9 +210,15 @@ class Tokenizer:
     else:
       parent.src.append(child)
 
-  def tokenize_operation(self, _in:List[Token], op:[Optional]=None) -> Token:
-    op_tok = Token(arg=TokenType.OP, src = _in, reg = self.op if op is None else op) 
-    return op_tok
+  # TODO: refactor
+  def tokenize_operation(self, _in: List[Token], op:[Ops]) -> Token:
+      if len(_in) == 1:
+        if op in UnaryOPS: return Token(arg=TokenType.OP, src=[_in[0]], reg=op)
+        else: return _in[0]
+      op_tok = Token(arg=TokenType.OP, src=[_in[0], _in[1]], reg=op)
+      for token in _in[2:]:
+          op_tok = Token(arg=TokenType.OP, src=[op_tok, token], reg=op)
+      return op_tok
   
   def tokenize_literal(self, item:int) -> Token:
     _tok = Token(arg=TokenType.LITERAL, src = item, reg = item)
@@ -227,40 +245,3 @@ class Tokenizer:
       fxn_name = f"{str(op_name.name)}{''.join(['_' + str(j) for j in self.in_s])}{''.join(['_' + str(j) for j in self.out_s])}"
       _tok = Token(arg=TokenType.FUNCTION, src = [], reg=fxn_name, ctx=self.buf_names)
     return _tok
-
-
-  '''
-
-  void ADD_2_3(float* buffer0, float* buffer1, float* buffer2) {
-    for (int idx0 = 0; idx0 < 6; idx0 += 1) {
-    float b0 = buffer0[idx0] + buffer1[idx0];
-    buffer2[idx0] = b0;
-    }
-  }
-
-  void ADD_2_3(float* buffer0, float* buffer1, float* buffer2) {
-    for (int idx0 = 0; idx0 < 3; idx0 += 1) {
-    float b0 = buffer0[idx0*2] + buffer1[idx0*2];
-    float b1 = buffer0[idx0*2+1] + buffer1[idx0*2+1];
-    buffer2[idx0*2] = b0;
-    buffer2[idx0*2+1] = b1;
-  }
-  '''  
-
-  def unroll_loops(self):
-    for loop in self.open_loops: 
-      st, iter, end = loop.ctx
-      new_st, new_iter, new_end = 0, 3, 1
-
-      # look for indexes
-      # push indexes over by new amount
-      # replicate children
-      self.unroll_chilren(loop)
-
-  def unroll_chilren(self, _tok:Token): 
-    if isinstance(_tok, Token):
-      if _tok.arg != TokenType.INDEX and len(_tok.src) > 0:
-        for child in _tok.src: 
-          self.unroll_chilren(child)
-      else: 
-        print('g')
