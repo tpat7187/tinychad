@@ -25,7 +25,6 @@ class LoadOP:
   def alloc_rand(self, shape:Tuple[int, ...], arg:int) -> np.ndarray:
     return np.random.randn(*shape).astype(np.float32)
 
-
 LoadOPSAllocator = {
   LoadOPS.RAND: LoadOP.alloc_rand,
   LoadOPS.CONST: LoadOP.alloc_const
@@ -52,7 +51,7 @@ class Buffer:
   def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
   def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
   def shape_op(self, fxn, axis, keepdim) -> Buffer: 
-    if axis < 0: axis = np.arange(len(self.shape))[axis]
+    if axis is not None and axis < 0: axis = np.arange(len(self.shape))[axis]
     return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
   def reshape_op(self, fxn:Ops, args) -> Buffer: 
     if fxn in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.op not in ShapeOPS:
@@ -138,6 +137,10 @@ class Buffer:
   # this should be done in passes: 1. Frontend OPT pass 2. Alloc pass 3. Tokenization pass 4. codegen pass
   # fusing reshapes/transpose into ops is not an OPT, we need it to reduce shitty code from the codegenerator
   def realize(self) -> Buffer:
+    if self.op in LoadOPS: 
+      self.alloc()
+      return self
+
     for f in self.children:
       if f.op not in LoadOPS:
         if not f._realized(): f.realize() 
@@ -146,6 +149,7 @@ class Buffer:
     kernel = C_Codegen(tokenizer.fxn).kernel
     self.alloc() 
     ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
+    return self
 
 
   def _realized(self): return self.data is not None
