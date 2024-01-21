@@ -137,7 +137,7 @@ class Tokenizer:
           lcl = self.tokenize_loop(0, i, 1, nested=True)
         children = []
         for x in range(self.inputs*lcl.ctx[2]):
-          st = self.tokenize_operation([self.tokenize_operation([j.reg, src_stride[x][i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops)], BinaryOPS.ADD)
+          st = self.MULACC(src_stride[x], self.open_loops)
           children.append(self.index(self.input_args[x], st))
       else:
         lcl = self.tokenize_loop(0, self.buf.size, 1) 
@@ -145,7 +145,7 @@ class Tokenizer:
       st = self.local_store(self.tokenize_operation(children, self.op), parent=lcl)
       if self.contiguous_op: out_st = lcl.reg
       else: 
-        out_st = self.tokenize_operation([self.tokenize_operation([j.reg, self.buf.strides[::-1][i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops)], BinaryOPS.ADD) 
+        out_st = self.MULACC(self.buf.strides[::-1], self.open_loops)
       self.global_store(st, self.index(self.output_args, out_st), parent=lcl)
 
     # we can probably repurpose this for PAD as they're both expand operations
@@ -153,20 +153,16 @@ class Tokenizer:
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
       [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
-      output_st = self.tokenize_operation([self.tokenize_operation([j.reg, output_stride[i]], BinaryOPS.MUL) for i,j in enumerate(reversed(self.open_loops))], BinaryOPS.ADD)
-      input_st = self.tokenize_operation([self.tokenize_operation([j.reg, input_stride[i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops) if i not in axis], BinaryOPS.ADD)
+      output_st = self.MULACC(output_stride, reversed(self.open_loops))
+      input_st = self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops) if i not in axis])
       input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
       lcl = self.local_store(input_index, parent=self.open_loops[-1])
       gbl = self.global_store(lcl, output_index,parent=self.open_loops[-1])
 
-  # TODO: write some function to abstract away statements like
-      '''
-    output_st = self.tokenize_operation([self.tokenize_operation([j.reg, output_stride[i]], BinaryOPS.MUL) for i,j in enumerate(reversed(self.open_loops))], BinaryOPS.ADD)
-    input_st = self.tokenize_operation([self.tokenize_operation([j.reg, input_stride[i]], BinaryOPS.MUL) for i,j in enumerate(self.open_loops) if i not in axis], BinaryOPS.ADD)
-      '''
-  def MULACC(self): 
-    pass
-
+  def MULACC(self, tok:Token, args:List[Token]) -> Token: 
+    inner = [self.tokenize_operation([j.reg, tok[i]], BinaryOPS.MUL) for i,j in enumerate(args)]
+    out = self.tokenize_operation(inner, BinaryOPS.ADD) 
+    return out
 
   def generate_shape_idx(self, loops:List[Token]) -> List[str]:
     assert len(loops) > 1
@@ -212,13 +208,14 @@ class Tokenizer:
 
   # TODO: refactor
   def tokenize_operation(self, _in: List[Token], op:[Ops]) -> Token:
-      if len(_in) == 1:
-        if op in UnaryOPS: return Token(arg=TokenType.OP, src=[_in[0]], reg=op)
-        else: return _in[0]
-      op_tok = Token(arg=TokenType.OP, src=[_in[0], _in[1]], reg=op)
-      for token in _in[2:]:
-          op_tok = Token(arg=TokenType.OP, src=[op_tok, token], reg=op)
-      return op_tok
+    if len(_in) == 1:
+      if op in UnaryOPS: return Token(arg=TokenType.OP, src=[_in[0]], reg=op)
+      else: return _in[0]
+    if any(j == 1 for j in _in) and op == BinaryOPS.MUL: return _in[0]
+    op_tok = Token(arg=TokenType.OP, src=[_in[0], _in[1]], reg=op)
+    for token in _in[2:]:
+        op_tok = Token(arg=TokenType.OP, src=[op_tok, token], reg=op)
+    return op_tok
   
   def tokenize_literal(self, item:int) -> Token:
     _tok = Token(arg=TokenType.LITERAL, src = item, reg = item)
