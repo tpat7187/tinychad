@@ -19,7 +19,7 @@ class FusedOp:
 class TokenType(Enum): 
   FUNCTION = auto(),      # args: fxn_name, num_inputs
   FUNCEND = auto(),
-  LOOP = auto(),     # args: start, num_iterations, num_increment
+  LOOP = auto(),          # args: start, num_iterations, num_increment
   OP = auto(),            # args: type, children
   CMP = auto(),           # args: type, children
   LOAD = auto(),          # args: loadidx, inputbuffer
@@ -29,3 +29,16 @@ class TokenType(Enum):
   DEFINE_ACC = auto(),    
   INDEX = auto(),         # args: buffer, idx
   LITERAL = auto(),       # args: item
+  IF = auto(),
+  AND = auto(),
+  OR = auto()
+
+class ControlType(Enum): 
+  LT = auto(), 
+  GT = auto(),
+  EQ = auto(),
+  NEQ = auto(),
+  AND = auto(),
+  OR = auto()
+
+  

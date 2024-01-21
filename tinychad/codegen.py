@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, subprocess, tempfile
 from typing import Union, Tuple, Optional, List, Dict
-from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, TokenType
+from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, TokenType, ControlType
 from tinychad.helpers import DEBUG
 from tinychad.tokenizer import Token
 import numpy as np 
@@ -42,7 +42,11 @@ class C_Codegen:
     UnaryOPS.EXP: lambda tok1: f"exp({tok1})",
     UnaryOPS.SQRT: lambda tok1: f"sqrt({tok1})",
     UnaryOPS.RELU: lambda tok1: f"relu({tok1})",
-    UnaryOPS.NEG: lambda tok1: f"-{tok1}"
+    UnaryOPS.NEG: lambda tok1: f"-{tok1}",
+    ControlType.GT: lambda tok1, tok2: f"{tok1} > {tok2}",
+    ControlType.LT: lambda tok1, tok2: f"{tok1} < {tok2}",
+    ControlType.EQ: lambda tok1, tok2: f"{tok1} == {tok2}",
+    ControlType.NEQ: lambda tok1, tok2: f"{tok1} != {tok2}"
   }
 
   def __init__(self, fxn_token): 
@@ -85,6 +89,13 @@ class C_Codegen:
         expr = self.generate_kernel(child)
       cg = f"{token.reg if token.reg in self.loads else 'float ' + token.reg} = {expr};"
       self.lines.append(cg)
+
+    elif token.arg == TokenType.IF:
+      cond = ' && '.join([f"({self.generate_kernel(c)})" for c in token.cond])
+      self.lines.append(f"if ( {cond} ) {{")
+      for child in token.src: 
+        self.generate_kernel(child) 
+      self.lines.append("}")
 
     elif token.arg == TokenType.OP:
       arguments = []

@@ -3,7 +3,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Union, List, Optional, Tuple, Any
 from enum import Enum, auto
-from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, TokenType, Ops
+from tinychad.ops_type import BinaryOPS, UnaryOPS, ReshapeOPS, ShapeOPS, TokenType, Ops, ControlType
 from tinychad.helpers import DEBUG
 
 ''' 
@@ -20,6 +20,7 @@ class Token:
   src:List[Union[Token, int]]
   reg:Optional[str]=""
   ctx:Optional[Any]=None
+  cond:Optional[Token]=None
 
 
   def __repr__(self, level=0, is_last=True, prefix=""):
@@ -159,10 +160,37 @@ class Tokenizer:
       lcl = self.local_store(input_index, parent=self.open_loops[-1])
       gbl = self.global_store(lcl, output_index,parent=self.open_loops[-1])
 
+    # TODO: combine this with CAST
+    if self.op == ReshapeOPS.PAD:
+      output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
+      axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
+      [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
+      val = self.local_store(0, parent=self.open_loops[-1])
+      # if ((ridx1 * (-1) < -1) && (ridx1 < 7) && (ridx0 * (-1) < -1) && (ridx0 < 7))
+
+      # top padding
+      conds_p = [self.tokenize_operation([self.tokenize_operation([self.open_loops[_].reg, -1], BinaryOPS.MUL), -1], ControlType.LT) for _ in axis]
+      # bottom padding
+      conds_e = [self.tokenize_operation([self.open_loops[_].reg, 7], ControlType.LT) for _ in axis]
+
+      conds = conds_p + conds_e
+      control = self.tokenize_control(conds, ControlType.AND, parent=self.open_loops[-1])
+      input_st = self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops) if i not in axis])
+      output_st = self.MULACC(output_stride, reversed(self.open_loops))
+      input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
+      gbl = self.global_store(val, output_index,parent=control)
+
   def MULACC(self, tok:Token, args:List[Token]) -> Token: 
     inner = [self.tokenize_operation([j.reg, tok[i]], BinaryOPS.MUL) for i,j in enumerate(args)]
     out = self.tokenize_operation(inner, BinaryOPS.ADD) 
     return out
+  
+  # tokenIF -> result if true
+  # cond will usually be a tokenize_operation
+  def tokenize_control(self, cond:list[Token], ctx:TokenType=None, parent:bool=None): 
+    _tok = Token(arg=TokenType.IF, src = [], ctx=ctx, cond=cond)
+    if parent: self.e(parent, _tok) 
+    return _tok
 
   def generate_shape_idx(self, loops:List[Token]) -> List[str]:
     assert len(loops) > 1
