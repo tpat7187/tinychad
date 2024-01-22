@@ -76,7 +76,7 @@ class Tokenizer:
 
     self.tokenize_buffer()
 
-    if DEBUG: print(self.fxn)
+    if int(DEBUG) > 1: print(self.fxn)
 
   def tokenize_buffer(self):
     self.fxn = self.generate_function() 

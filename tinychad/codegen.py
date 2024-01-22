@@ -55,7 +55,7 @@ class C_Codegen:
     self.loads = {}
     self.kernel = self.generate_kernel(fxn_token)
 
-    if DEBUG: 
+    if int(DEBUG) > 2: 
       print(self.kernel)
 
   def generate_kernel(self, token):

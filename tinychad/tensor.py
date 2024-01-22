@@ -17,10 +17,10 @@ class OP:
 
   @classmethod
   def apply(self:Type[ops.OP], *x:tensor, lazy:Optional[bool] = False, **kwargs):
-    if DEBUG: st = time.monotonic()
+    if int(DEBUG) > 0: st = time.monotonic()
     _op = self(saved = [*x], ctx = list(kwargs.values()))
     out = tensor(self.forward(*[j.data for j in x], **kwargs), op = _op)
-    if DEBUG: 
+    if int(DEBUG) > 0: 
       et= time.monotonic() - st
       in_s = list(n.shape for n in out.op.saved)
       print("op = {:10} in: {:<45} out: {:<30} in: {:.2f}us with dtype{:10}".format(out.op.arg, str(in_s), str(out.data.shape), et*1e4, str(out.data.dtype)))

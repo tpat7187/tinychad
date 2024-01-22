@@ -9,7 +9,7 @@ import networkx as nx
 
 # TODO: make this its own class
 # measure time in frontend, backend and execution
-DEBUG = os.getenv("DEBUG") 
+DEBUG = os.getenv("DEBUG", 0)
 
 def get_parameters(obj:object, max_depth:int=4, depth:int=0) -> list: 
     from tinychad.tensor import tensor, Conv2d, Linear, BatchNorm2d
