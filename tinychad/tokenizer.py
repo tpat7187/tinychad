@@ -94,7 +94,7 @@ class Tokenizer:
       else: 
         gbl_size = np.prod(self.out_s) if self.axis is not None else 0
 
-      local_loops = 1 if self.axis is None else 2 if blocked else 1
+      local_loops = 2 if blocked else 1 
       gbl = self.tokenize_loop(0, gbl_size, 1) if gbl_size else None
       acc = self.tokenize_start_acc(parent = gbl) if local_loops == 1 else None
       if local_loops == 1: 

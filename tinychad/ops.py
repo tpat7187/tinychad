@@ -31,7 +31,7 @@ class MUL(OP):
     return x.binary_op(BinaryOPS.MUL, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return out_grad * self.saved[1].detach(), out_grad*self.saved[0].detach()
+    return out_grad * self.saved[1].detatch(), out_grad*self.saved[0].detatch()
 
 class DIV(OP): 
   __slots__ = "x", "y"
@@ -40,7 +40,7 @@ class DIV(OP):
     return x.binary_op(BinaryOPS.DIV, y)
   
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return (self.saved[1].detach()**-1) * out_grad, -(self.saved[0].detach()/self.saved[1].detach()**2)*out_grad
+    return (self.saved[1].detatch()**-1) * out_grad, -(self.saved[0].detatch()/self.saved[1].detatch()**2)*out_grad
 
 class MATMUL(OP): 
   __slots__ = "x", "y"
@@ -49,7 +49,7 @@ class MATMUL(OP):
     return x.binary_op(BinaryOPS.MATMUL, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return np.matmul(out_grad, self.saved[1].detach().T), np.matmul(self.saved[0].detach().T, out_grad)
+    return np.matmul(out_grad, self.saved[1].detatch().T), np.matmul(self.saved[0].detatch().T, out_grad)
 
 class GTT(OP): 
   __slots__ = "x", "y" 
@@ -86,7 +86,7 @@ class LOG(OP):
     return x.unary_op(UnaryOPS.LOG)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return out_grad / self.saved[0].detach()
+    return out_grad / self.saved[0].detatch()
 
 class NEG(OP): 
   __slots__ = "x"
@@ -127,7 +127,7 @@ class MAX(OP):
     if kd is False:
       out = np.expand_dims(out, axis=axis) if axis is not None else out
       out_grad = np.expand_dims(out_grad, axis=axis) if axis is not None else out_grad
-    tt = 1.0 - (self.saved[0].detach() < np.broadcast_to(out, self.saved[0].shape)).astype(np.float32)
+    tt = 1.0 - (self.saved[0].detatch() < np.broadcast_to(out, self.saved[0].shape)).astype(np.float32)
     exp = np.broadcast_to(tt.sum(axis=axis,keepdims=True), self.saved[0].shape)
     out = (tt / exp) * np.broadcast_to(out_grad, self.saved[0].shape)
     return out
@@ -163,7 +163,7 @@ class SLICE(OP):
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     arg = self.ctx[0]
-    acc = np.zeros_like(self.saved[0].detach())
+    acc = np.zeros_like(self.saved[0].detatch())
     np.add.at(acc, *arg, out_grad)
     return acc
 

@@ -45,9 +45,9 @@ def op_test_helper(shape, tinychadfxn, torchfxn, axis=None, keepdim=None):
 
   x.realize()
   try: 
-    np.testing.assert_allclose(x.detach(), xt.numpy(), atol =1e-6 , rtol =1e-3)
+    np.testing.assert_allclose(x.detatch(), xt.numpy(), atol =1e-6 , rtol =1e-3)
   except Exception: 
-    raise Exception(f"<fw pass failure> tinychad:\n {x.detach()} \n, pytorch:\n {xt.numpy()}")
+    raise Exception(f"<fw pass failure> tinychad:\n {x.detatch()} \n, pytorch:\n {xt.numpy()}")
 
 
 class run_backend_tests(unittest.TestCase): 
@@ -78,12 +78,17 @@ class run_backend_tests(unittest.TestCase):
     op_test_helper((5,5,5), tensor.sum, torch.sum, axis = 0)
     op_test_helper((5,3,5), tensor.sum, torch.sum, axis = 1)
     op_test_helper((5,3,4,1,5), tensor.sum, torch.sum, axis = 2)
+    op_test_helper((2,2,1,2,2), tensor.sum, torch.sum, axis=4)
+    #op_test_helper((2,2,1,2,2), tensor.sum, torch.sum, axis=3) broken kernelgen
+    
 
   def test_max(self): 
     op_test_helper((5,5), tensor.max, torch.max)
     op_test_helper((5,5,5), tensor.max, torch.max, axis = 0)
     op_test_helper((5,3,5), tensor.max, torch.max, axis = 1)
     op_test_helper((5,3,4,1,5), tensor.max, torch.max, axis = 2)
+    op_test_helper((2,2,1,2,2), tensor.max, torch.max, axis=4)
+    #op_test_helper((2,2,1,2,2), tensor.max, torch.max, axis=3) broken kernelgen
 
 if __name__ == "__main__": 
   unittest.main()

@@ -150,7 +150,7 @@ class tensor:
     self.data.realize()
     return self
 
-  def detach(self) -> np.ndarray: return self.data.data
+  def detatch(self) -> np.ndarray: return self.data.data
 
   def _softmax(self, axis:int) -> Tuple[tensor, tensor, tensor]:
     m = self - self.max(axis=axis, keepdim=True)
@@ -269,7 +269,7 @@ class tensor:
     assert(self.shape == (1,))
     self.grad = np.ones(self.shape, dtype=np.float32)
     for x in reversed(self.toposort()): 
-      grads = x.op.backward(x.grad, x.detach())
+      grads = x.op.backward(x.grad, x.detatch())
       if len(x.op.saved) == 1: 
         grads = [grads]
       for buf, gr in zip(x.op.saved, grads): 
@@ -308,7 +308,7 @@ class tensor:
   # indexing based on y_true.data which is a buffer, rn slice only supports ndarray, int
   def NLLLoss(self, y_true: tensor) -> tensor:
     batch_s = self.shape[0]
-    idx_probs = self[np.arange(batch_s).astype(np.int32), y_true.detach()]
+    idx_probs = self[np.arange(batch_s).astype(np.int32), y_true.detatch()]
     loss = (batch_s / -idx_probs.sum()).reciprocal()
     return loss
 
