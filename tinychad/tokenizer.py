@@ -153,7 +153,7 @@ class Tokenizer:
     if self.op == ReshapeOPS.CAST:
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
-      [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
+      [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s] # can we do this in 2 loops every time
       output_st = self.MULACC(output_stride, reversed(self.open_loops))
       input_st = self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops) if i not in axis])
       input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
@@ -163,21 +163,27 @@ class Tokenizer:
     # TODO: combine this with CAST
     if self.op == ReshapeOPS.PAD:
       output_stride, input_stride = self.buf.strides, self.buf.children[0].strides[::-1]
+      zv = tuple([(-b,s+e) for s,(b,e) in zip(self.in_s, self.buf.ctx)])
+      mask = tuple([(b,s+b) for s,(b,_) in zip(self.in_s, self.buf.ctx)])
+      offset = sum([s*p[0] for s,p in zip(input_stride, zv)])
       axis = [i for i,j in enumerate(self.out_s) if self.in_s[i] != j]
-      [self.tokenize_loop(0, _, 1, nested=True) for _ in self.out_s]
+
+      self.tokenize_loop(0, self.out_s[0], 1, nested=True)
+      self.tokenize_loop(0, np.prod(self.out_s[1:]), 1, nested=True)
       val = self.local_store(0, parent=self.open_loops[-1])
       # if ((ridx1 * (-1) < -1) && (ridx1 < 7) && (ridx0 * (-1) < -1) && (ridx0 < 7))
+      pargs = [-(_[0]-1) for _ in self.buf.ctx]
 
-      # top padding
-      conds_p = [self.tokenize_operation([self.tokenize_operation([self.open_loops[_].reg, -1], BinaryOPS.MUL), -1], ControlType.LT) for _ in axis]
-      # bottom padding
-      print(self.out_s) 
-      print(self.in_s)
-      conds_e = [self.tokenize_operation([self.open_loops[_].reg, self.out_s[1] - self.in_s[1]], ControlType.LT) for _ in axis]
-
+      # n > 0 in (n, m)
+      # m > 0 in (n, m) 
+      nargs = [i for i, (f, _) in enumerate(self.buf.ctx) if f != 0]
+      margs = [i for i, (_, f) in enumerate(self.buf.ctx) if f != 0]
+      conds_p = [self.tokenize_operation([self.tokenize_operation([self.open_loops[_].reg, -1], BinaryOPS.MUL), pargs[_]], ControlType.LT) for _ in nargs]
+      conds_e = [self.tokenize_operation([self.open_loops[j].reg, mask[-i][-1]], ControlType.LT) for i,j in enumerate(margs)]
       conds = conds_p + conds_e
+
       control = self.tokenize_control(conds, ControlType.AND, parent=self.open_loops[-1])
-      input_st = self.tokenize_operation([self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops)]), 12], BinaryOPS.SUB)
+      input_st = self.tokenize_operation([self.MULACC(input_stride, self.open_loops), offset], BinaryOPS.ADD)
       input_index = self.index(self.input_args[0], input_st) 
       lcl = self.local_store(input_index, val.reg, parent=control) 
 
