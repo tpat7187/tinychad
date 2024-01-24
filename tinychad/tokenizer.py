@@ -171,14 +171,19 @@ class Tokenizer:
       # top padding
       conds_p = [self.tokenize_operation([self.tokenize_operation([self.open_loops[_].reg, -1], BinaryOPS.MUL), -1], ControlType.LT) for _ in axis]
       # bottom padding
-      conds_e = [self.tokenize_operation([self.open_loops[_].reg, 7], ControlType.LT) for _ in axis]
+      print(self.out_s) 
+      print(self.in_s)
+      conds_e = [self.tokenize_operation([self.open_loops[_].reg, self.out_s[1] - self.in_s[1]], ControlType.LT) for _ in axis]
 
       conds = conds_p + conds_e
       control = self.tokenize_control(conds, ControlType.AND, parent=self.open_loops[-1])
-      input_st = self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops) if i not in axis])
+      input_st = self.tokenize_operation([self.MULACC(input_stride, [j for i,j in enumerate(self.open_loops)]), 12], BinaryOPS.SUB)
+      input_index = self.index(self.input_args[0], input_st) 
+      lcl = self.local_store(input_index, val.reg, parent=control) 
+
       output_st = self.MULACC(output_stride, reversed(self.open_loops))
-      input_index, output_index = self.index(self.input_args[0], input_st), self.index(self.output_args, output_st)
-      gbl = self.global_store(val, output_index,parent=control)
+      output_index = self.index(self.output_args, output_st)
+      gbl = self.global_store(val, output_index,parent=self.open_loops[-1])
 
   def MULACC(self, tok:Token, args:List[Token]) -> Token: 
     inner = [self.tokenize_operation([j.reg, tok[i]], BinaryOPS.MUL) for i,j in enumerate(args)]
