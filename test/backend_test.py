@@ -1,18 +1,21 @@
 from tinychad.tensor import tensor
+import torch.nn.functional as F
 import torch
 import numpy as np 
 import unittest
 
 
-def op_test_helper(shape, tinychadfxn, torchfxn, axis=None, keepdim=None):
+def op_test_helper(shape, tinychadfxn, torchfxn, axis=None, keepdim=None, args=None, torch_pad_args=None):
   np.random.seed(0)
   UNARY_OPS = (tensor.relu, tensor.exp, tensor.log, tensor.neg, tensor.sqrt)
   BINARY_OPS = (tensor.add, tensor.sub, tensor.div, tensor.mul)
   SHAPE_OPS = (tensor.sum, tensor.max)
+  RESHAPE_OPS = (tensor.pad, tensor.cast_to)
 
   if tinychadfxn in UNARY_OPS: src = 1
   if tinychadfxn in BINARY_OPS: src = 2
   if tinychadfxn in SHAPE_OPS: src = 1
+  if tinychadfxn in RESHAPE_OPS: src = 1
 
   chi = [] 
   if not isinstance(shape, list):
@@ -42,6 +45,9 @@ def op_test_helper(shape, tinychadfxn, torchfxn, axis=None, keepdim=None):
     xt = torchfxn(*torch_tensors,  dim = axis) if axis is not None else torchfxn(*torch_tensors)
     if axis is not None:
       xt = xt.values
+  if tinychadfxn in RESHAPE_OPS:
+    x = tinychadfxn(*tinychad_tensors, args=args)
+    xt = torchfxn(*torch_tensors, pad=torch_pad_args)
 
   x.realize()
   try: 
@@ -89,6 +95,13 @@ class run_backend_tests(unittest.TestCase):
     op_test_helper((5,3,4,1,5), tensor.max, torch.max, axis = 2)
     op_test_helper((2,2,1,2,2), tensor.max, torch.max, axis=4)
     #op_test_helper((2,2,1,2,2), tensor.max, torch.max, axis=3) broken kernelgen
+
+  def test_pad(self):
+    op_test_helper((5, 5), tensor.pad, F.pad, args=(((2, 2), (2, 2))), torch_pad_args=(2,2,2,2))  
+    op_test_helper((3, 3), tensor.pad, F.pad, args=(((1, 1), (1, 1))), torch_pad_args=(1,1,1,1)) 
+    #op_test_helper((4, 4), tensor.pad, F.pad, args=(((0, 0), (2, 3))), torch_pad_args=(2,3,0,0))
+    op_test_helper((6, 6), tensor.pad, F.pad, args=(((3, 4), (1, 2))), torch_pad_args=(1,2,3,4))  
+
 
 if __name__ == "__main__": 
   unittest.main()

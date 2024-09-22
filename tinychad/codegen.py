@@ -88,6 +88,7 @@ class C_Codegen:
       for child in token.src:
         expr = self.generate_kernel(child)
       cg = f"{token.reg if token.reg in self.loads else 'float ' + token.reg} = {expr};"
+      self.loads[token.reg] = token
       self.lines.append(cg)
 
     elif token.arg == TokenType.IF:
