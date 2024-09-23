@@ -32,12 +32,25 @@ LoadOPSAllocator = {
 
 OPT = os.getenv("OPT", 0)
 
-# maybe we just use buffers for kernel fusion and ast gen ;) 
+# this is a fused kernel
+# will always output a single tensor
+'''
+class Function: 
+  def __init__(self, root): 
+    self.root = root 
+'''
+
+
+# TODO: remove reshapes
 class Buffer: 
   __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes"
   def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
       self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
+
+      # kernel to be fused
+      #self.func = Function()
+
 
   @property 
   def dtype(self): return np.float32
@@ -48,11 +61,16 @@ class Buffer:
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
-  def binary_op(self, fxn, x:Buffer) -> Buffer: return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
-  def unary_op(self, fxn) -> Buffer: return Buffer(self.shape, fxn, [self])
+  def binary_op(self, fxn, x:Buffer) -> Buffer: 
+    return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+
+  def unary_op(self, fxn) -> Buffer: 
+    return Buffer(self.shape, fxn, [self])
+
   def shape_op(self, fxn, axis, keepdim) -> Buffer: 
     if axis is not None and axis < 0: axis = np.arange(len(self.shape))[axis]
     return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+
   def reshape_op(self, fxn:Ops, args) -> Buffer: 
     if fxn in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.op not in ShapeOPS:
       return self.merge_reshape_into_e(fxn, args)
@@ -95,43 +113,6 @@ class Buffer:
       for buf in self.children:
         buf._alloc()
 
-  # has_cycle, takes in parent, and child and will assert that the other children cannot reach that particular child
-  def merge_binary_ops(self, max_size: int = 5) -> Buffer:
-    for i in self.children:
-      if any(op in BinaryOPS for op in i.kernArgs) and self.has_cycle(i):
-        print('fusing', self, i)
-        self.kernArgs.extend(i.kernArgs)
-        self.children.extend(i.children)
-        self.children.remove(i)
-        i.merge_binary_ops(max_size)
-
-  def ast_kernel_fuser(self): 
-    if OPT and self.children:
-      if any(op in BinaryOPS for op in self.kernArgs): 
-        self.merge_binary_ops()
-      for child in self.children[:]:
-        child.ast_kernel_fuser()
-
-  # this is going to be really slow because for each op its going to need to check the entire computation graph below it
-  def has_cycle(self, target, visited=None, rec_stack=None):
-    if visited is None: 
-      visited = set() 
-    if rec_stack is None: 
-      rec_stack = set()
-    visited.add(self)
-    rec_stack.add(self)
-    if self.children:
-      for child in self.children:
-        if child == target and child in rec_stack:
-            return True
-        if child not in visited:
-          if child.has_cycle(target, visited, rec_stack):
-            return True
-        elif child in rec_stack and child != target:
-          continue
-    rec_stack.remove(self)
-    return False
-
   # we should combine this with the old realize function that toposorts the non LoadOPS
   # need way of storing already generated kernels for reuse
   # this should be done in passes: 1. Frontend OPT pass 2. Alloc pass 3. Tokenization pass 4. codegen pass
@@ -169,7 +150,7 @@ class Buffer:
       return Buffer(_bufcast.shape, op=LoadOPS.READ, ctx=_loadop, data=_bufcast)
     else: 
       raise NotImplementedError
-  
+
 class ViewTracker: 
   @classmethod 
   def generate_strides(self, shape): 

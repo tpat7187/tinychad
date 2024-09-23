@@ -1,15 +1,18 @@
 from __future__ import annotations
 import numpy as np
 from tinychad.tensor import OP
-from typing import Union
-from tinychad.buffers import Buffer, Buffer
+from typing import Union, Optional
+from tinychad.buffers import Buffer
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS
 
+# TODO: at some point we need to make the backward pass work again for now we just care about the actual compiler part
+ 
 # binary ops
 class ADD(OP): 
   __slots__ = "x", "y"
-  @staticmethod
-  def forward(x:Buffer, y:Buffer) -> Buffer: 
+  @classmethod
+  def forward(self, x:Buffer, y:Buffer) -> Buffer: 
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.ADD, y)
   
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -17,8 +20,9 @@ class ADD(OP):
 
 class SUB(OP): 
   __slots__ = "x", "y"
-  @staticmethod
-  def forward(x:Buffer, y:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, y:Buffer) -> Buffer:
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.SUB, y)
   
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -26,35 +30,39 @@ class SUB(OP):
 
 class MUL(OP): 
   __slots__ = "x", "y"
-  @staticmethod
-  def forward(x:Buffer, y:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, y:Buffer) -> Buffer:
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.MUL, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return out_grad * self.saved[1].detatch(), out_grad*self.saved[0].detatch()
+    return out_grad * self.y.data, out_grad*self.x.data
 
 class DIV(OP): 
   __slots__ = "x", "y"
-  @staticmethod
-  def forward(x:Buffer, y:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, y:Buffer) -> Buffer:
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.DIV, y)
   
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return (self.saved[1].detatch()**-1) * out_grad, -(self.saved[0].detatch()/self.saved[1].detatch()**2)*out_grad
+    return (self.y.data()**-1) * out_grad, -(self.x.data()/self.y.data()**2)*out_grad
 
 class MATMUL(OP): 
   __slots__ = "x", "y"
-  @staticmethod
-  def forward(x:Buffer, y:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, y:Buffer) -> Buffer:
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.MATMUL, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return np.matmul(out_grad, self.saved[1].detatch().T), np.matmul(self.saved[0].detatch().T, out_grad)
+    return np.matmul(out_grad, self.y.data.T), np.matmul(self.x.data.T, out_grad)
 
 class GTT(OP): 
   __slots__ = "x", "y" 
-  @staticmethod 
-  def forward(x: Buffer, y:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x: Buffer, y:Buffer) -> Buffer:
+    self.x, self.y = x, y 
     return x.binary_op(BinaryOPS.MAX, y)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -63,8 +71,9 @@ class GTT(OP):
 # unary ops
 class RELU(OP):
   __slots__ = "x"
-  @staticmethod
-  def forward(x:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer) -> Buffer:
+    self.x = x
     return x.unary_op(UnaryOPS.RELU)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -72,8 +81,9 @@ class RELU(OP):
 
 class EXP(OP): 
   __slots__ = "x"
-  @staticmethod
-  def forward(x:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer) -> Buffer:
+    self.x = x
     return x.unary_op(UnaryOPS.EXP)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -81,17 +91,19 @@ class EXP(OP):
 
 class LOG(OP): 
   __slots__ = "x"
-  @staticmethod
-  def forward(x:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer) -> Buffer:
+    self.x = x
     return x.unary_op(UnaryOPS.LOG)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return out_grad / self.saved[0].detatch()
+    return out_grad / self.x.data
 
 class NEG(OP): 
   __slots__ = "x"
-  @staticmethod
-  def forward(x:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer) -> Buffer:
+    self.x = x
     return x.unary_op(UnaryOPS.NEG)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -99,8 +111,9 @@ class NEG(OP):
 
 class SQRT(OP): 
   __slots__ = "x"
-  @staticmethod 
-  def forward(x:Buffer) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer) -> Buffer:
+    self.x = x
     return x.unary_op(UnaryOPS.SQRT)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -109,34 +122,37 @@ class SQRT(OP):
 # shape ops
 class SUM(OP):
   __slots__ = "x", "axis", "keepdim"
-  @staticmethod
-  def forward(x:Buffer, axis, keepdim) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, axis:Optional[int], keepdim:bool) -> Buffer:
+    self.x, self.axis, self.keepdim = x, axis, keepdim
     return x.shape_op(ShapeOPS.SUM, axis, keepdim)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    return np.broadcast_to(out_grad, self.saved[0].shape)
+    print(self.x)
+    return np.broadcast_to(out_grad, self.x.shape)
       
 class MAX(OP): 
   __slots__ = "x", "axis", "keepdim"
-  @staticmethod
-  def forward(x:Buffer, axis, keepdim) -> Buffer: 
+  @classmethod
+  def forward(self, x:Buffer, axis:Optional[int], keepdim:bool) -> Buffer: 
+    self.x, self.axis, self.keepdim = x, axis, keepdim
     return x.shape_op(ShapeOPS.MAX, axis, keepdim)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    axis, kd = self.ctx[0], self.ctx[1]
-    if kd is False:
-      out = np.expand_dims(out, axis=axis) if axis is not None else out
-      out_grad = np.expand_dims(out_grad, axis=axis) if axis is not None else out_grad
-    tt = 1.0 - (self.saved[0].detatch() < np.broadcast_to(out, self.saved[0].shape)).astype(np.float32)
-    exp = np.broadcast_to(tt.sum(axis=axis,keepdims=True), self.saved[0].shape)
+    if self.keepdim is False:
+      out = np.expand_dims(out, axis=self.axis) if self.axis is not None else out
+      out_grad = np.expand_dims(out_grad, axis=self.axis) if self.axis is not None else out_grad
+    tt = 1.0 - (self.x.data < np.broadcast_to(out, self.x.shape)).astype(np.float32)
+    exp = np.broadcast_to(tt.sum(axis=self.axis,keepdims=True), self.saved[0].shape)
     out = (tt / exp) * np.broadcast_to(out_grad, self.saved[0].shape)
     return out
 
 # reshape ops
 class RESHAPE(OP): 
   __slots__ = "x", "args"
-  @staticmethod 
-  def forward(x:Buffer, args) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, args) -> Buffer:
+    self.x, self.args = x, args
     return x.reshape_op(ReshapeOPS.RESHAPE, args)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -144,33 +160,36 @@ class RESHAPE(OP):
 
 class CAST(OP):
   __slots__ = "x", "args"
-  @staticmethod 
-  def forward(x:Buffer, args) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, args) -> Buffer:
+    self.x, self.args = x, args
     return x.reshape_op(ReshapeOPS.CAST, args)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
-    diff = len(out_grad.shape) - len(self.saved[0].shape)
+    diff = len(out_grad.shape) - len(self.x.shape)
     if diff > 0: out_grad = out_grad.sum(axis=tuple(np.arange(diff)))
-    t = tuple([i for i, (a, b) in enumerate(zip(out_grad.shape, self.saved[0].shape)) if a != b])
+    t = tuple([i for i, (a, b) in enumerate(zip(out_grad.shape, self.x.shape)) if a != b])
     out_grad = out_grad.sum(axis = t, keepdims = True)
     return out_grad
 
 class SLICE(OP):
   __slots__ = "x", "args"
-  @staticmethod
-  def forward(x:Buffer, args) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, args) -> Buffer:
+    self.x, self.args = x, args
     return x.reshape_op(ReshapeOPS.SLICE, args)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
     arg = self.ctx[0]
-    acc = np.zeros_like(self.saved[0].detatch())
+    acc = np.zeros_like(self.x.data)
     np.add.at(acc, *arg, out_grad)
     return acc
 
 class PAD(OP): 
   __slots__ = "x", "args"
-  @staticmethod 
-  def forward(x: Buffer, args) -> Buffer:
+  @classmethod
+  def forward(self, x: Buffer, args) -> Buffer:
+    self.x, self.args = x, args
     return x.reshape_op(ReshapeOPS.PAD, args)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:
@@ -180,8 +199,9 @@ class PAD(OP):
 
 class TRANSPOSE(OP): 
   __slots__ = "x", "args"
-  @staticmethod
-  def forward(x:Buffer, args) -> Buffer:
+  @classmethod
+  def forward(self, x:Buffer, args) -> Buffer:
+    self.x, self.args = x, args
     return x.reshape_op(ReshapeOPS.TRANSPOSE, args)
 
   def backward(self:OP, out_grad:np.ndarray, out:np.ndarray) -> np.ndarray:

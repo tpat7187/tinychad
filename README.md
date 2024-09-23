@@ -7,11 +7,7 @@ goals:
   - recreate important deep learning architectures using tinychad (LSTM, RESNET, Transformer)
 
 TODO: 
-  * elementwise op kernel fusion
-  * have backend reuse kernels
-  * write matmul kernel as a (reshape * transpose.reshape).sum()
-  * Compiled MNIST
-  * state dict for transfer learning
+  * refactor frontend to perform kernel fusion
 
 ## how to chad
 tinychad is like pytorch but slower but also significantly smaller
