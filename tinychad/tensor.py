@@ -28,6 +28,10 @@ class OP:
 
 import tinychad.ops as ops
 
+# tensor should point to output buffer
+# output buffer should have a fused operation
+# fused operation has computation graph for that kernel
+
 # **** TENSOR CLASS ****
 class tensor: 
   __slots__ = "data", "requires_grad", "grad", "op"
@@ -71,7 +75,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self.data).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
+    return f"<{type(self).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)

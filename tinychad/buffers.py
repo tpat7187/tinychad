@@ -32,24 +32,17 @@ LoadOPSAllocator = {
 
 OPT = os.getenv("OPT", 0)
 
-# this is a fused kernel
-# will always output a single tensor
-'''
-class Function: 
-  def __init__(self, root): 
-    self.root = root 
-'''
+# fxn : local computation graph
 
 
+# children -> global kernel graph
+# src -> local graph
 # TODO: remove reshapes
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes"
-  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None): 
-      self.shape, self.op, self.children, self.ctx, self.data = shape, op, children, ctx, data
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes", "src"
+  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None, src=None): 
+      self.shape, self.op, self.children, self.ctx, self.data, self.src = shape, op, children, ctx, data, src
       self.strides = ViewTracker.generate_strides(shape)
-
-      # kernel to be fused
-      #self.func = Function()
 
 
   @property 
@@ -61,8 +54,13 @@ class Buffer:
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
 
+  # fused operations do not return a buffer, we simply edit our current buffer
+  # the only binop that changes shape is a matmul, ill implement that later 
   def binary_op(self, fxn, x:Buffer) -> Buffer: 
-    return Buffer(ViewTracker.generate_view(fxn, [self, x]), fxn, [self, x])
+    if self.children is not None and all([j.op in LoadOPS for j in self.children]): 
+      _lsrc = [j for j in self.children if j.op in LoadOPS]
+      return Buffer(self.shape, fxn, self.children, src= [self, x])
+    return Buffer(self.shape, fxn, [self, x])
 
   def unary_op(self, fxn) -> Buffer: 
     return Buffer(self.shape, fxn, [self])
