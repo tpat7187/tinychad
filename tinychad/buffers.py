@@ -32,33 +32,35 @@ LoadOPSAllocator = {
 
 OPT = os.getenv("OPT", 0)
 
-# fxn : node that has no buffer that performs an operation
+# optype : node that has no buffer that performs an operation
 
 class Function: 
   def __init__(self, optype, srcs): 
     self.optype = optype # general type EG: BinaryOPS
     self.srcs: Union[Function, Buffer] = srcs
 
+  def __repr__(self):
+    return f"<{type(self).__name__}: srcs = <{self.srcs}>]>"
+
 
 MERGE_ELEMENTWISE_OPS = 1
 
+# this will set the children depending on something
+def create_buffer(shape, optype, func): 
+  return Buffer(shape, optype=optype, fxn = func)
 
-# children -> global kernel graph
-# src -> local graph
+
 # TODO: remove reshapes
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes", "fxn"
-  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None, fxn=None): 
-      self.shape, self.op, self.children, self.ctx, self.data, = shape, op, children, ctx, data
+  __slots__ = "shape", "optype", "children", "data", "ctx", "strides", "fxn"
+  def __init__(self, shape, optype, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None, fxn=None): 
+      self.shape, self.optype, self.children, self.ctx, self.data, = shape, optype, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
-
 
       self.fxn = fxn
 
       # children is the link between kernels
       # loads can always be merged into Function
-
-
 
   @property 
   def dtype(self): return np.float32
@@ -67,35 +69,33 @@ class Buffer:
   def size(self): return math.prod(self.shape)
 
   def __repr__(self): 
-    return f"<{type(self).__name__}: op = <{self.op}>: [shape = {self.shape}, strides = {self.strides}]>"
+    return f"<{type(self).__name__}: op = <{self.optype}>: [shape = {self.shape}, strides = {self.strides}]>"
 
   # fused operations do not return a buffer, we simply edit our current buffer
   # the only binop that changes shape is a matmul, ill implement that later 
   # function is created every call
-  def binary_op(self, fxn, x:Buffer) -> Buffer: 
+  def binary_op(self, optype, x:Buffer) -> Buffer: 
     src: Tuple[Buffer] = [self, x]
-    Func = Function(fxn, src)
 
-    # i think this is working
-    if x.children is None and self.op in BinaryOPS: 
-      new_src = [self.fxn, x]
-      new_func = Function(fxn, new_src) 
-      return Buffer(self.shape, fxn, children=None, fxn = new_func)
+    # TODO: need a function that creates buffers and assigns children
+    if MERGE_ELEMENTWISE_OPS and (x.children is None and self.optype in BinaryOPS): 
+      src = [self.fxn, x]
 
-    return Buffer(self.shape, fxn, children=None, fxn = Func)
+    return create_buffer(self.shape, optype, Function(optype, src))
 
+  def unary_op(self, optype) -> Buffer: 
+    return Buffer(self.shape, optype, [self])
 
-  def unary_op(self, fxn) -> Buffer: 
-    return Buffer(self.shape, fxn, [self])
-
-  def shape_op(self, fxn, axis, keepdim) -> Buffer: 
+  def shape_op(self, optype, axis, keepdim) -> Buffer: 
     if axis is not None and axis < 0: axis = np.arange(len(self.shape))[axis]
-    return Buffer(ViewTracker.generate_view(fxn, [self], axis=axis, keepdim=keepdim), fxn, [self], ctx=[axis, keepdim])
+    return Buffer(ViewTracker.generate_view(optype, [self], axis=axis, keepdim=keepdim), optype, [self], ctx=[axis, keepdim])
 
-  def reshape_op(self, fxn:Ops, args) -> Buffer: 
-    if fxn in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.op not in ShapeOPS:
-      return self.merge_reshape_into_e(fxn, args)
-    else: return Buffer(ViewTracker.generate_view(fxn, self, args=args), fxn, [self], ctx=args)
+  def reshape_op(self, optype:Ops, args) -> Buffer: 
+    '''
+    if optype in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.optype not in ShapeOPS:
+      return self.merge_reshape_into_e(optype, args)
+    '''
+    return Buffer(ViewTracker.generate_view(optype, self, args=args), optype, [self], ctx=args)
 
   # a Buffer is realized if its data is not None
   def realized(self:Buffer) -> bool: return self.data is not None
@@ -103,10 +103,10 @@ class Buffer:
   def is_contiguous(self:Buffer) -> bool: 
     return all(self.strides[i+1] >= self.strides[i] for i in range(len(self.strides) - 1))
 
-  def merge_reshape_into_e(buf:Buffer, fxn, args) -> Buffer: 
-    buf.reshapes = fxn
-    buf.shape = ViewTracker.generate_view(fxn, buf, args=args)
-    if fxn == ReshapeOPS.TRANSPOSE: buf.strides = tuple([buf.strides[::-1][_] for _ in args])[::-1]
+  def merge_reshape_into_e(buf:Buffer, optype, args) -> Buffer: 
+    buf.reshapes = optype
+    buf.shape = ViewTracker.generate_view(optype, buf, args=args)
+    if optype == ReshapeOPS.TRANSPOSE: buf.strides = tuple([buf.strides[::-1][_] for _ in args])[::-1]
     else: buf.strides = ViewTracker.generate_strides(buf.shape)
     buf.ctx = args
     return buf
@@ -114,19 +114,19 @@ class Buffer:
   @staticmethod
   def const_load(shape:Tuple[int, ...], arg:int) -> Buffer:
     _loadop = LoadOP(shape, LoadOPS.CONST, arg=arg)
-    return Buffer(shape, op = LoadOPS.CONST, ctx = _loadop)
+    return Buffer(shape, optype = LoadOPS.CONST, ctx = _loadop)
 
   @staticmethod
   def rand_load(shape:Tuple[int, ...]) -> Buffer:
     _loadop = LoadOP(shape, LoadOPS.RAND)
-    return Buffer(shape, op=LoadOPS.RAND, ctx = _loadop)
+    return Buffer(shape, optype=LoadOPS.RAND, ctx = _loadop)
 
   def _alloc(self): 
     if self.data is None: 
       if not isinstance(self.ctx, LoadOP): 
         self.data = LoadOP.alloc_raw(self.shape)
       else:
-        self.data = LoadOPSAllocator[self.op](self.ctx.shape, self.ctx.arg)
+        self.data = LoadOPSAllocator[self.optype](self.ctx.shape, self.ctx.arg)
 
   def alloc(self):
     self._alloc()
@@ -139,18 +139,18 @@ class Buffer:
   # this should be done in passes: 1. Frontend OPT pass 2. Alloc pass 3. Tokenization pass 4. codegen pass
   # fusing reshapes/transpose into ops is not an OPT, we need it to reduce shitty code from the codegenerator
   def realize(self) -> Buffer:
-    if self.op in LoadOPS: 
+    if self.optype in LoadOPS: 
       self.alloc()
       return self
 
     for f in self.children:
-      if f.op not in LoadOPS:
+      if f.optype not in LoadOPS:
         if not f._realized(): f.realize() 
     
     tokenizer = Tokenizer(self) 
-    kernel = C_Codegen(tokenizer.fxn).kernel
+    kernel = C_Codegen(tokenizer.op).kernel
     self.alloc() 
-    ExecuteCProgram(kernel, self, tokenizer.fxn.reg).run()
+    ExecuteCProgram(kernel, self, tokenizer.op.reg).run()
     return self
 
 
@@ -160,15 +160,15 @@ class Buffer:
   def read_load(data) -> Buffer: 
     if isinstance(data, (int, float)): 
       _loadop = LoadOP((1,), LoadOPS.READ)
-      return Buffer((1,), op=LoadOPS.READ, ctx =_loadop, data=data)
+      return Buffer((1,), optype=LoadOPS.READ, ctx =_loadop, data=data)
     elif isinstance(data, np.ndarray): 
       data.astype(np.float32) if data.dtype != np.float32 else data
       _loadop = LoadOP(data.shape, LoadOPS.READ)
-      return Buffer(data.shape, op=LoadOPS.READ, ctx=_loadop, data=data)
+      return Buffer(data.shape, optype=LoadOPS.READ, ctx=_loadop, data=data)
     elif isinstance(data, list): 
       _loadop = LoadOP((len(data),1), LoadOPS.READ)
       _bufcast = np.array(data).astype(np.float32)
-      return Buffer(_bufcast.shape, op=LoadOPS.READ, ctx=_loadop, data=_bufcast)
+      return Buffer(_bufcast.shape, optype=LoadOPS.READ, ctx=_loadop, data=_bufcast)
     else: 
       raise NotImplementedError
 

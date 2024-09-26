@@ -75,7 +75,7 @@ class tensor:
   def size(self): return self.data.size
 
   def __repr__(self): 
-    return f"<{type(self).__name__}: op = <{self.data.op}>: [shape = {self.shape}, strides = {self.data.strides}]>"
+    return f"<{type(self).__name__}: op = <{self.data.optype}>: [shape = {self.shape}, strides = {self.data.strides}]>"
   
   # TODO: getitem by tensor index
   def __getitem__(self, args): return self.slice(args)
@@ -124,8 +124,8 @@ class tensor:
   def transpose(self, *args) : return self.reshape_op(ops.TRANSPOSE, args = args)
   def cast(self, args): return self.reshape_op(ops.CAST, args=args)
 
-  def reshape_op(self, fxn:ops.OP, *args:tensor, lazy:Optional[bool] = False, **kwargs) -> tensor: 
-    return fxn.apply(self, **kwargs, lazy=lazy)
+  def reshape_op(self, fxn:ops.OP, *args:tensor, **kwargs) -> tensor: 
+    return fxn.apply(self, **kwargs)
 
   def T(self) -> tensor: return tensor(self.data.transpose())
   def matmul(self, x): return self.dot(x)
