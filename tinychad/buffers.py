@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, math, ctypes, subprocess, tempfile
 import numpy as np 
-from typing import Union, Tuple, Optional, List, Dict
+from typing import Union, Tuple, Optional, List, Dict, Any
 from tinychad.ops_type import UnaryOPS, BinaryOPS, ShapeOPS, ReshapeOPS, LoadOPS, Ops
 from tinychad.tokenizer import Tokenizer
 from tinychad.codegen import ExecuteCProgram, C_Codegen
@@ -46,9 +46,8 @@ class Function:
 MERGE_ELEMENTWISE_OPS = 1
 
 # this will set the children depending on something
-def create_buffer(shape, optype, func): 
-  return Buffer(shape, optype=optype, fxn = func)
-
+def create_buffer(shape, optype, func, ctx:Optional[List[Any]]=None): 
+  return Buffer(shape, optype=optype, fxn = func, ctx=ctx)
 
 # TODO: remove reshapes
 class Buffer: 
@@ -70,10 +69,21 @@ class Buffer:
 
   def __repr__(self): 
     return f"<{type(self).__name__}: op = <{self.optype}>: [shape = {self.shape}, strides = {self.strides}]>"
+  
+  def __add__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.ADD, x)
+  def __radd__(self, x:Buffer) -> Buffer: return x.binary_op(BinaryOPS.ADD, self)
+  def __sub__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.SUB, x)
+  def __rsub__(self, x:Buffer) -> Buffer: return x.binary_op(BinaryOPS.SUB, self)
+  def __mul__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.MUL, x)
+  def __rmul__(self, x:Buffer) -> Buffer: return x.binary_op(BinaryOPS.MUL, self)
+  def __truediv__(self, x:Buffer) -> Buffer: return self.binary_op(BinaryOPS.DIV, x)
+  def __rtruediv__(self, x:Buffer) -> Buffer: return x.binary_op(BinaryOPS.DIV, self)
+  def __neg__(self) -> Buffer: return self.unary_op(UnaryOPS.NEG)
 
   # fused operations do not return a buffer, we simply edit our current buffer
   # the only binop that changes shape is a matmul, ill implement that later 
   # function is created every call
+
   def binary_op(self, optype, x:Buffer) -> Buffer: 
     src: Tuple[Buffer] = [self, x]
 
@@ -83,18 +93,15 @@ class Buffer:
 
     return create_buffer(self.shape, optype, Function(optype, src))
 
-  def unary_op(self, optype) -> Buffer: 
-    return Buffer(self.shape, optype, [self])
+  def unary_op(self, optype) -> Buffer: return create_buffer(self.shape, optype, Function(optype, self))
 
   def shape_op(self, optype, axis, keepdim) -> Buffer: 
     if axis is not None and axis < 0: axis = np.arange(len(self.shape))[axis]
-    return Buffer(ViewTracker.generate_view(optype, [self], axis=axis, keepdim=keepdim), optype, [self], ctx=[axis, keepdim])
+    out_s = ViewTracker.generate_view(optype, [self], axis=axis, keepdim=keepdim)
+    return create_buffer(out_s, optype, Function(optype, self), ctx=[axis, keepdim])
+    #return Buffer(ViewTracker.generate_view(optype, [self], axis=axis, keepdim=keepdim), optype, [self], ctx=[axis, keepdim])
 
   def reshape_op(self, optype:Ops, args) -> Buffer: 
-    '''
-    if optype in (ReshapeOPS.RESHAPE, ReshapeOPS.TRANSPOSE) and self.optype not in ShapeOPS:
-      return self.merge_reshape_into_e(optype, args)
-    '''
     return Buffer(ViewTracker.generate_view(optype, self, args=args), optype, [self], ctx=args)
 
   # a Buffer is realized if its data is not None
