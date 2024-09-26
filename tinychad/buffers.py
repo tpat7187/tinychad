@@ -32,17 +32,32 @@ LoadOPSAllocator = {
 
 OPT = os.getenv("OPT", 0)
 
-# fxn : local computation graph
+# fxn : node that has no buffer that performs an operation
+
+class Function: 
+  def __init__(self, optype, srcs): 
+    self.optype = optype # general type EG: BinaryOPS
+    self.srcs: Union[Function, Buffer] = srcs
+
+
+MERGE_ELEMENTWISE_OPS = 1
 
 
 # children -> global kernel graph
 # src -> local graph
 # TODO: remove reshapes
 class Buffer: 
-  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes", "src"
-  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None, src=None): 
-      self.shape, self.op, self.children, self.ctx, self.data, self.src = shape, op, children, ctx, data, src
+  __slots__ = "shape", "op", "children", "data", "ctx", "strides", "reshapes", "fxn"
+  def __init__(self, shape, op, children:Optional[List[Buffer]]=None, data:Optional[np.ndarray]=None, ctx=None, fxn=None): 
+      self.shape, self.op, self.children, self.ctx, self.data, = shape, op, children, ctx, data
       self.strides = ViewTracker.generate_strides(shape)
+
+
+      self.fxn = fxn
+
+      # children is the link between kernels
+      # loads can always be merged into Function
+
 
 
   @property 
@@ -56,11 +71,19 @@ class Buffer:
 
   # fused operations do not return a buffer, we simply edit our current buffer
   # the only binop that changes shape is a matmul, ill implement that later 
+  # function is created every call
   def binary_op(self, fxn, x:Buffer) -> Buffer: 
-    if self.children is not None and all([j.op in LoadOPS for j in self.children]): 
-      _lsrc = [j for j in self.children if j.op in LoadOPS]
-      return Buffer(self.shape, fxn, self.children, src= [self, x])
-    return Buffer(self.shape, fxn, [self, x])
+    src: Tuple[Buffer] = [self, x]
+    Func = Function(fxn, src)
+
+    # i think this is working
+    if x.children is None and self.op in BinaryOPS: 
+      new_src = [self.fxn, x]
+      new_func = Function(fxn, new_src) 
+      return Buffer(self.shape, fxn, children=None, fxn = new_func)
+
+    return Buffer(self.shape, fxn, children=None, fxn = Func)
+
 
   def unary_op(self, fxn) -> Buffer: 
     return Buffer(self.shape, fxn, [self])
